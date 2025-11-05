@@ -5,6 +5,8 @@ import { apiCall } from "../utils/api"
 import Card from "../components/Card"
 import LoadingSpinner from "../components/LoadingSpinner"
 import ErrorAlert from "../components/ErrorAlert"
+import "./CourseDetailPage.css"
+import QuestionList from "../components/QuestionList"
 // import "./CourseDetailPage.css" // You'll want to create this CSS file
 
 function CourseDetailPage({ course, setCurrentPage }) {
@@ -43,6 +45,7 @@ function CourseDetailPage({ course, setCurrentPage }) {
         setDeadlines(deadlinesData || [])
         setFiles(filesData || [])
         setAiContent(aiContentData || [])
+        console.log(aiContentData)
         
       } catch (err) {
         setError(err.message || "Failed to load course details")
@@ -63,11 +66,17 @@ function CourseDetailPage({ course, setCurrentPage }) {
   // Helper to render AI content
   const renderAiContent = (item) => {
     try {
-      const content = JSON.parse(item.content_json);
+      // --- [FIX] ---
+      // 'item.content_json' is ALREADY an object.
+      // We just assign it directly.
+      const content = item.content_json;
+      // --- [END FIX] ---
+
       if (item.type === 'summary') {
         return (
           <>
             <strong>Summary:</strong>
+            {/* Access content.summary directly */}
             <ul>{content.summary?.map((pt, i) => <li key={i}>{pt}</li>) || <li>N/A</li>}</ul>
             <strong>Key Topics:</strong>
             <ul>{content.key_topics?.map((pt, i) => <li key={i}>{pt}</li>) || <li>N/A</li>}</ul>
@@ -76,29 +85,22 @@ function CourseDetailPage({ course, setCurrentPage }) {
       }
       if (item.type === 'questions') {
         return (
-          <div className="questions-list">
-            {content.review_questions?.map((q, i) => (
-              <div key={i} className="question-item">
-                <p><strong>Q{i+1}: {q.question}</strong></p>
-                <ul>
-                  {q.options.map((opt, oi) => <li key={oi}>{opt}</li>)}
-                </ul>
-                <p><em>Answer: {q.correct_answer}</em></p>
-                <p><em>Explanation: {q.explanation}</em></p>
-              </div>
-            ))}
-          </div>
-        )
+          <QuestionList questions={content.review_questions} />
+        );
       }
       if (item.type === 'hint') {
         return (
           <>
             <p><strong>Your Question:</strong> {item.user_question}</p>
+            {/* Access content.hint directly */}
             <p><strong>Hint:</strong> {content.hint}</p>
           </>
         )
       }
-    } catch (e) { return <p>Error parsing AI content.</p> }
+    } catch (e) { 
+      console.error("Error rendering AI content:", e, item);
+      return <p>Error rendering AI content (see console).</p> 
+    }
   }
 
   return (

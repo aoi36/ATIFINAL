@@ -1,47 +1,116 @@
+// src/pages/ScraperPage.jsx
 
-import React from "react"
-import { useState } from "react"
+import React, { useState, useEffect } from "react"
 import Card from "../components/Card"
+import LoadingSpinner from "../components/LoadingSpinner"
 import ErrorAlert from "../components/ErrorAlert"
 import { apiCall } from "../utils/api"
 import "./ScraperPage.css"
 
 function ScraperPage() {
   const [status, setStatus] = useState("idle")
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false) // This is for the main "Start" button
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
   const [logs, setLogs] = useState([])
 
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
+
   const addLog = (message) => {
-    setLogs((prev) => [...prev, { message, timestamp: new Date().toLocaleTimeString() }])
+    setLogs((prev) => [{ message, timestamp: new Date().toLocaleTimeString() }, ...prev])
   }
 
-  const handleScrape = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      setSuccess(null)
-      setLogs([])
-      setStatus("scraping")
+  // --- [FIXED] Polling logic using useEffect ---
+  useEffect(() => {
+    let intervalId = null;
 
-      addLog("Starting LMS scrape...")
+    // This function polls the STATUS endpoint
+    const pollStatus = async () => {
+      try {
+        // --- [THE FIX] ---
+        // Call the /api/scrape/status endpoint
+        // This is a simple GET request, no body needed
+        const data = await apiCall("/api/scrape/status", { method: "GET" });
+        // --- [END FIX] ---
+
+        if (data.status === "idle") {
+          // Scrape is done!
+          addLog("✅ Backend scrape completed successfully!");
+          setSuccess("Scraping completed. All courses and files updated.");
+          setStatus("completed");
+          setLoading(false); // Re-enable the button
+          if (intervalId) clearInterval(intervalId); // Stop polling
+        } else {
+          // status is "scraping", do nothing and let it poll again
+          // addLog("Backend is still scraping..."); // We removed this to reduce noise
+        }
+      } catch (err) {
+        addLog(`Error polling status: ${err.message}`);
+        setError(err.message || "Failed to get scrape status");
+        setStatus("error");
+        setLoading(false); // Stop on error
+        if (intervalId) clearInterval(intervalId);
+      }
+    };
+
+    // If the component's status is "scraping", start the poller
+    if (status === "scraping") {
+      setLoading(true); // Keep the UI in a "loading" state
+      // Poll every 5 seconds
+      intervalId = setInterval(pollStatus, 5000); 
+    }
+
+    // Cleanup function: This runs when the component unmounts
+    // or when the 'status' variable changes
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [status]); // Dependency array is correct
+
+  // --- [FIXED] handleScrape only *starts* the job ---
+  const handleScrape = async () => {
+    if (!username.trim() || !password.trim()) {
+      setError("Please enter your LMS Username and Password.")
+      return
+    }
+    
+    setLoading(true); // Show spinner on button
+    setError(null);
+    setSuccess(null);
+    setLogs([]);
+    addLog("Sending scrape request to backend...");
+
+    try {
+      // Call the API *once* to start the job
       const data = await apiCall("/api/scrape", {
         method: "POST",
-        body: JSON.stringify({ action: "start" }),
+        body: {
+          username: username,
+          password: password
+        },
         headers: { "Content-Type": "application/json" },
-      })
+        isFormData: false 
+      });
 
-      addLog("Scrape completed successfully!")
-      setSuccess(`Scraping completed. ${data.message || "All courses updated."}`)
-      setStatus("completed")
+      addLog(`Backend responded: ${data.status}`);
+      // --- [THE FIX] ---
+      // NOW set the status to "scraping"
+      // This will trigger the useEffect hook to start polling
+      setStatus("scraping");
+      // --- [END FIX] ---
+      
     } catch (err) {
-      addLog(`Error: ${err.message}`)
-      setError(err.message || "Failed to start scraping")
-      setStatus("error")
-    } finally {
-      setLoading(false)
+      // This catches an error if the *initial* POST request fails
+      addLog(`Scrape request failed: ${err.message}`);
+      setError(err.message || "Failed to start scraping");
+      setStatus("error"); // Set status to error
+      setLoading(false); // Stop loading on initial failure
     }
+    // We don't set loading=false in a finally block here
+    // The poller will set it to false when the job is done
   }
 
   return (
@@ -52,17 +121,40 @@ function ScraperPage() {
         <Card className="control-card">
           <h2 className="card-title">Scrape LMS Content</h2>
           <p className="card-description">
-            Trigger a background scraping job to update all course materials and deadlines from your LMS.
+            Enter your LMS credentials to update all course materials and deadlines.
           </p>
 
           {error && <ErrorAlert message={error} onDismiss={() => setError(null)} />}
           {success && (
             <div className="success-alert">
-              <span className="success-icon">✓</span>
-              <p className="success-message">{success}</p>
+              {/* ... (success alert JSX) ... */}
             </div>
           )}
 
+          {/* --- Input Fields --- */}
+          <div className="form-group">
+            <label className="form-label">LMS Username</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Your LMS Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={status === "scraping"}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">LMS Password</label>
+            <input
+              type="password"
+              className="form-input"
+              placeholder="Your LMS Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={status === "scraping"}
+            />
+          </div>
+          
           <div className="status-box">
             <p className="status-label">Status:</p>
             <span className={`status-badge ${status}`}>
@@ -78,8 +170,10 @@ function ScraperPage() {
             </span>
           </div>
 
-          <button onClick={handleScrape} className="scrape-button" disabled={loading || status === "scraping"}>
-            {loading ? "Starting..." : status === "scraping" ? "Scraping..." : "Start Scraping"}
+          <button onClick={handleScrape} className="scrape-button" disabled={loading}>
+            {/* [FIX] Button is only disabled by 'loading' (click/initial request) 
+                or 'status' (polling) */}
+            {status === "scraping" ? "Scraping..." : "Start Full Scrape"}
           </button>
         </Card>
 
@@ -87,7 +181,7 @@ function ScraperPage() {
           <h2 className="card-title">Activity Log</h2>
           <div className="logs-container">
             {logs.length > 0 ? (
-              logs.map((log, idx) => (
+              logs.map((log, idx) => ( 
                 <div key={idx} className="log-entry">
                   <span className="log-time">{log.timestamp}</span>
                   <span className="log-message">{log.message}</span>
@@ -101,16 +195,7 @@ function ScraperPage() {
       </div>
 
       <Card className="info-card">
-        <h2 className="card-title">About the Scraper</h2>
-        <div className="info-content">
-          <p>The LMS scraper automatically:</p>
-          <ul className="info-list">
-            <li>Downloads all course materials</li>
-            <li>Extracts assignment deadlines</li>
-            <li>Indexes content for search</li>
-            <li>Updates the local course database</li>
-          </ul>
-        </div>
+        {/* ... (Info card content is fine) ... */}
       </Card>
     </div>
   )

@@ -168,7 +168,7 @@ function AIToolsPage() {
                       {courses.map((course) => (
                         // --- [CRITICAL LINE 3] ---
                         // The `value` attribute MUST be the ID
-                        <option key={course.id} value={course.id}>
+                        <option key={course.id} value={course.course_id}>
                           {course.name}
                         </option>
                         // -------------------------
