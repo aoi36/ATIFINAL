@@ -10,7 +10,7 @@ import mss
 import traceback
 import numpy as np
 from datetime import datetime
-from moviepy import VideoFileClip
+from moviepy.editor import VideoFileClip, AudioFileClip
 import whisper
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By

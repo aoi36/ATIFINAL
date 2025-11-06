@@ -4,6 +4,9 @@ from whoosh.index import create_in, open_dir, exists_in
 from whoosh.fields import Schema, ID, TEXT, STORED
 from whoosh.qparser import QueryParser # <-- We import it from Whoosh here
 from whoosh.highlight import Formatter, ContextFragmenter
+import docx
+import pptx
+import pdfplumber
 from config import INDEX_DIR # Import from config
 
 # --- Schema Definition (from your code) ---

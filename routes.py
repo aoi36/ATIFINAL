@@ -3,6 +3,8 @@ import os
 import json
 import threading
 import glob
+from whoosh.highlight import ContextFragmenter, PinpointFragmenter
+from whoosh.qparser import QueryParser
 import traceback # Import traceback for error logging
 from flask import (
     Blueprint, jsonify, request, abort, g, send_from_directory, render_template_string
@@ -27,8 +29,7 @@ from ai_service import (
 )
 from meeting_service import join_meet_automated_and_record
 from search_service import (
-    SimpleFormatter, open_dir, exists_in, 
-    ContextFragmenter, INDEX_DIR
+    SimpleFormatter, open_dir, exists_in, INDEX_DIR
 )
 
 # --- Create the Blueprint ---
@@ -82,13 +83,36 @@ def home():
 
 @bp.route('/api/scrape', methods=['POST'])
 def trigger_scrape():
-    """Triggers the full scraping process in a background thread."""
+    """
+    Triggers the full scraping process in a background thread.
+    Accepts 'username' and 'password' from the JSON body.
+    """
     if state.IS_SCRAPING:
         return jsonify({"status": "Scrape already in progress."}), 409
-    print("API: Received request to start scrape...")
-    from config import LMS_USERNAME, LMS_PASSWORD # Import credentials just in time
-    scraping_thread = threading.Thread(target=perform_full_scrape, args=(LMS_USERNAME, LMS_PASSWORD), daemon=True)
+
+    # --- [NEW] Get credentials from the request body ---
+    data = request.json
+    if not data:
+        return jsonify({"error": "Request body must be JSON."}), 400
+
+    lms_user = data.get('username')
+    lms_pass = data.get('password')
+
+    if not lms_user or not lms_pass:
+        return jsonify({"error": "Missing 'username' or 'password' in JSON body."}), 400
+    # --- [END NEW] ---
+
+    print(f"API: Received scrape request for user {lms_user}...") # Don't log the password!
+
+    # --- [MODIFIED] Pass the new credentials to the thread ---
+    scraping_thread = threading.Thread(
+        target=perform_full_scrape, 
+        args=(lms_user, lms_pass), # Pass the user-provided credentials
+        daemon=True
+    )
     scraping_thread.start()
+    # --- [END MODIFIED] ---
+    
     return jsonify({"status": "Scrape initiated in background."}), 202
 
 @bp.route('/api/scrape/status', methods=['GET'])
