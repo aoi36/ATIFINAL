@@ -1,0 +1,23 @@
+# requirements.txt
+
+google-generativeai
+Flask
+Flask-Cors
+schedule
+python-dotenv
+opencv-python
+mss
+numpy
+moviepy
+openai-whisper
+undetected-chromedriver
+selenium
+sounddevice
+soundfile
+requests
+beautifulsoup4
+python-docx
+python-pptx
+pdfplumber
+python-dateutil
+Whoosh
