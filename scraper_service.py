@@ -9,7 +9,9 @@ import urllib.parse
 from selenium import webdriver
 from datetime import timedelta
 import docx
+import subprocess
 import pptx
+import shutil
 import pdfplumber
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
@@ -31,6 +33,59 @@ from search_service import clear_search_index
 # (Paste clean_file_text, parse_time_remaining, read_docx, read_pptx, read_pdf, download_file here)
 #
 # Example (paste your full function):
+
+# --- [MODIFIED] Helper to convert files to PDF ---
+def convert_to_pdf(file_path, output_dir):
+    """
+    Uses LibreOffice (soffice) to convert a document to PDF.
+    Returns the path to the new PDF if successful, else None.
+    """
+    print(f"   [Converter] Attempting to convert {os.path.basename(file_path)} to PDF...")
+    
+    # --- [THE FIX] ---
+    # We will hardcode the full path to soffice.com that we found earlier.
+    # The 'r' before the string handles the backslashes.
+    soffice_path = r'D:\New Folder\program\soffice.com'
+    # -----------------
+
+    try:
+        # 3. Use the full path variable
+        command = [
+            soffice_path,      # <--- Use the full path
+            '--headless',
+            '--convert-to', 'pdf',
+            '--outdir', output_dir, 
+            file_path
+        ]
+        
+        # Run the command with a 60-second timeout
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+
+        if result.returncode == 0:
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            pdf_filename = f"{base_name}.pdf"
+            pdf_path = os.path.join(output_dir, pdf_filename)
+            
+            if os.path.exists(pdf_path):
+                print(f"   [Converter] ✅ Successfully converted to {pdf_filename}")
+                return pdf_path
+            else:
+                print(f"   [Converter] ⚠️ Conversion command ran, but output PDF not found.")
+                print(f"   [Converter] STDOUT: {result.stdout}")
+                print(f"   [Converter] STDERR: {result.stderr}")
+                return None
+        else:
+            print(f"   [Converter] ❌ Conversion failed. Return code: {result.returncode}")
+            print(f"   [Converter] STDERR: {result.stderr}")
+            return None
+            
+    except subprocess.TimeoutExpired:
+        print(f"   [Converter] ❌ ERROR: Conversion for {os.path.basename(file_path)} timed out.")
+        return None
+    except Exception as e:
+        print(f"   [Converter] ❌ An unexpected error occurred during conversion: {e}")
+        return None
+# --- [END MODIFIED HELPER] ---
 
 def download_file(url, folder, cookies, headers, link_text="") -> str | None:
     filename = None
@@ -716,11 +771,31 @@ def perform_full_scrape(lms_user, lms_pass):
                         # --- [STATE] Track this file ---
                         all_found_file_names.add(os.path.basename(local_path))
                         # -----------------------------
-                        extracted_text=None; file_type="Unknown"; file_ext_lower=os.path.splitext(local_path)[1].lower()
-                        if file_ext_lower==".docx": file_type="Word"; extracted_text=read_docx(local_path)
-                        elif file_ext_lower==".pptx": file_type="PowerPoint"; extracted_text=read_pptx(local_path)
-                        elif file_ext_lower==".pdf": file_type="PDF"; extracted_text=read_pdf(local_path)
                         
+                        extracted_text=None
+                        file_type="Unknown"
+                        file_ext_lower=os.path.splitext(local_path)[1].lower()
+
+                        # --- [FIXED LOGIC] ---
+                        # Check for readable types first
+                        if file_ext_lower == ".docx":
+                            file_type="Word"
+                            extracted_text=read_docx(local_path)
+                            # Convert this file
+                            convert_to_pdf(local_path, course_folder) 
+                        
+                        elif file_ext_lower == ".pptx":
+                            file_type="PowerPoint"
+                            extracted_text=read_pptx(local_path)
+                            # Convert this file
+                            convert_to_pdf(local_path, course_folder)
+                        
+                        elif file_ext_lower == ".pdf":
+                            file_type="PDF"
+                            extracted_text=read_pdf(local_path)
+                            # It's already a PDF, no conversion needed.
+                        
+                        # Now, index the text if we found any
                         if extracted_text:
                             cleaned_text = clean_file_text(extracted_text)
                             txt_fname = f"{os.path.splitext(os.path.basename(local_path))[0]}.txt"
@@ -734,30 +809,36 @@ def perform_full_scrape(lms_user, lms_pass):
                                 file_name=os.path.basename(local_path),
                                 file_type=file_type, content=cleaned_text
                             )
-                        elif not extracted_text: print("            ➖ Skipping (no text/unsupported/archive).")
+                        elif file_ext_lower in ('.zip', '.rar'):
+                            print("            ➖ Skipping text extraction (archive file).")
+                        elif file_ext_lower not in ('.docx', '.pptx', '.pdf'):
+                            print(f"            ➖ Skipping text extraction (unsupported file: {file_ext_lower}).")
+                        # --- [END FIXED LOGIC] ---
                     continue # Next link in main list
 
-                # --- Process as HTML Page ---
+               # --- Process as HTML Page ---
                 else:
                     try:
                         print("         📄 Visiting as HTML page...")
                         driver.get(href)
                         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                        time.sleep(1)
+                        time.sleep(1) # Small delay for JS rendering
                         current_page_source = driver.page_source
                     except Exception as e:
-                        print(f"            ⚠️ Failed load page: {e}"); continue
+                        print(f"            ⚠️ Failed load page: {e}")
+                        continue # Skip to the next link in the main list
 
-                    # Save HTML
+                    # Save HTML of this sub-page
                     parsed=urllib.parse.urlparse(href); path_part=parsed.path.strip("/") or "root"; query_part=parsed.query.replace("&","_").replace("=","-")
                     safe_subname=re.sub(r'[\\/*?:"<>|]', "_", f"{idx}_{path_part}" + (f"_{query_part}" if query_part else ""))[:200]
                     sub_filename=os.path.join(course_folder, f"{safe_subname}.html")
                     try:
                         with open(sub_filename, "w", encoding="utf-8") as fh: fh.write(current_page_source)
                         print(f"            💾 Saved HTML -> {sub_filename}")
-                    except Exception as save_html_e: print(f"            ⚠️ Failed to save HTML: {save_html_e}")
+                    except Exception as save_html_e:
+                        print(f"            ⚠️ Failed to save HTML for {href}: {save_html_e}")
 
-                    # Find and Process Nested File Links
+                    # --- Find and Process Nested File Links ---
                     try:
                         print("         DEBUG: Waiting up to 10s for nested pluginfile links...")
                         try:
@@ -791,14 +872,19 @@ def perform_full_scrape(lms_user, lms_pass):
                                      nested_local_path = download_file(f_href, course_folder, cookies_dict, headers, f_link_text)
                                      
                                      if nested_local_path:
-                                          # --- [STATE] Track this file ---
                                           all_found_file_names.add(os.path.basename(nested_local_path))
-                                          # -----------------------------
                                           extracted_text=None; file_type="Unknown"; file_ext_lower=os.path.splitext(nested_local_path)[1].lower()
-                                          if file_ext_lower==".docx": file_type="Word"; extracted_text=read_docx(nested_local_path)
-                                          elif file_ext_lower==".pptx": file_type="PowerPoint"; extracted_text=read_pptx(nested_local_path)
-                                          elif file_ext_lower==".pdf": file_type="PDF"; extracted_text=read_pdf(nested_local_path)
 
+                                          # --- [CORRECT LOGIC] ---
+                                          if file_ext_lower == ".docx":
+                                              file_type="Word"; extracted_text=read_docx(nested_local_path)
+                                              convert_to_pdf(nested_local_path, course_folder) # Call convert
+                                          elif file_ext_lower == ".pptx":
+                                              file_type="PowerPoint"; extracted_text=read_pptx(nested_local_path)
+                                              convert_to_pdf(nested_local_path, course_folder) # Call convert
+                                          elif file_ext_lower == ".pdf":
+                                              file_type="PDF"; extracted_text=read_pdf(nested_local_path)
+                                          
                                           if extracted_text:
                                                cleaned_text = clean_file_text(extracted_text)
                                                txt_fname=f"{os.path.splitext(os.path.basename(nested_local_path))[0]}.txt"
@@ -813,7 +899,9 @@ def perform_full_scrape(lms_user, lms_pass):
                                                    file_type=file_type, content=cleaned_text
                                                )
                                           elif not extracted_text: print("               ➖ Skipping nested analysis (no text/unsupported/archive).")
-                                     else: print(f"            ❌ Nested download FAILED for {f_href}.")
+                                          # --- [END CORRECT LOGIC] ---
+                                     else: 
+                                         print(f"            ❌ Nested download FAILED for {f_href}.")
                                  except Exception as nested_proc_e:
                                      print(f"               ⚠️ Error processing nested link {f_href or 'unknown'}: {nested_proc_e}")
                             
@@ -828,10 +916,7 @@ def perform_full_scrape(lms_user, lms_pass):
                     if "mod/assign/" in href or "mod/quiz/" in href:
                         deadline_info = get_deadline_info(current_page_source)
                         if deadline_info:
-                            # --- [STATE] Track this deadline ---
                             all_found_deadline_urls.add(href) 
-                            # -----------------------------------
-                            
                             deadline_info["url"] = href
                             original_time_str = deadline_info.get("time")
                             iso_timestamp = None
@@ -857,7 +942,6 @@ def perform_full_scrape(lms_user, lms_pass):
                                 deadline_info.get('time'), iso_timestamp, href
                             ))
                             print(f"            🎯 Deadline Found (Method: {deadline_info.get('method', 'N/A')}): {deadline_info.get('status','N/A')} - {original_time_str}")
-            # --- End Subpage Loop ---
 
             # --- Save deadlines for this course to DB ---
             if deadlines_to_add:
