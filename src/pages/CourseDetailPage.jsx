@@ -60,6 +60,58 @@ function CourseDetailPage({ course, setCurrentPage }) {
   }, [course.course_id]) 
   // --- [END FIX] ---
 
+  const getDisplayFiles = () => {
+    const fileSet = new Set(files); // A set of all file names
+    const processedFiles = []; // This will be our new list of file objects
+    
+    // Sort files to process docx/pptx *before* pdf/txt
+    const sortedFiles = [...files].sort((a, b) => {
+        const aExt = a.split('.').pop().toLowerCase();
+        const bExt = b.split('.').pop().toLowerCase();
+        // Prioritize docx/pptx
+        if (aExt.includes('doc') || aExt.includes('ppt')) return -1;
+        if (bExt.includes('doc') || bExt.includes('ppt')) return 1;
+        return 0;
+    });
+
+    for (const filename of sortedFiles) {
+      if (fileSet.has(filename) === false) continue; // Already processed as part of a pair
+
+      const base_name = filename.substring(0, filename.lastIndexOf('.'));
+      const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
+
+      let fileObj = {
+        displayName: decodeURIComponent(filename), // The original name to show
+        linkName: filename,    // The file to link to
+        isViewable: false, // Can it be opened in the browser?
+      };
+
+      if (ext === '.docx' || ext === '.pptx') {
+        const pdf_version = `${base_name}.pdf`;
+        
+        if (fileSet.has(pdf_version)) {
+          // Found a PDF conversion!
+          fileObj.linkName = pdf_version; // Link to the PDF
+          fileObj.isViewable = true;
+          fileSet.delete(pdf_version); // Mark the PDF as "handled"
+        } else {
+          // No PDF, link to original (will download)
+          fileObj.isViewable = false;
+        }
+      } else if (ext === '.pdf' || ext === '.txt') {
+        // It's a PDF or TXT, link to itself (is viewable)
+        fileObj.isViewable = true;
+      }
+      // For .zip, .rar, is_viewable remains false
+
+      processedFiles.push(fileObj);
+      fileSet.delete(filename); // Mark this file as "handled"
+    }
+    return processedFiles;
+  };
+  
+  const displayFiles = getDisplayFiles();
+
   if (loading) return <LoadingSpinner />
   if (error) return <ErrorAlert message={error} onDismiss={() => setError(null)} />
 
@@ -126,20 +178,25 @@ function CourseDetailPage({ course, setCurrentPage }) {
       </Card>
 
       <Card title="Scraped Files" className="detail-card">
-        {files.length > 0 ? (
+        {displayFiles.length > 0 ? (
           <ul className="file-list">
-            {files.map((filename, i) => (
+            {displayFiles.map((file, i) => (
               <li key={i}>
-                {/* --- [FIX #4] --- */}
-                {/* Use course.course_id here as well */}
-                <a href={`${import.meta.env.VITE_API_URL}/api/get_file/${course.course_id}/${encodeURIComponent(filename)}`}
+                <a 
+                   href={`${import.meta.env.VITE_API_URL}/api/get_file/${course.course_id}/${encodeURIComponent(file.linkName)}`}
                    target="_blank" 
                    rel="noopener noreferrer"
-                   download={filename}
+                   // This is important:
+                   // - If it's viewable (PDF/TXT), 'download' is undefined (so it opens in-tab)
+                   // - If it's not viewable (DOCX/ZIP), 'download' is set, forcing a download
+                   download={file.isViewable ? undefined : file.displayName}
                 >
-                  {decodeURIComponent(filename)}
+                  {file.displayName}
+                  {/* Add a helpful (Preview) or (Download) tag */}
+                  <span className="file-type-badge">
+                    {file.isViewable ? " (Preview)" : " (Download)"}
+                  </span>
                 </a>
-                {/* --- [END FIX] --- */}
               </li>
             ))}
           </ul>
