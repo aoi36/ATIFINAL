@@ -1,6 +1,7 @@
 # requirements.txt
 
 google-generativeai
+PyJWT Werkzeug
 Flask
 Flask-Cors
 schedule

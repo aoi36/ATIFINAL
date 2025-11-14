@@ -16,28 +16,77 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+
+# Imports for audio recording
 import sounddevice as sd
 import soundfile as sf
 
-# (Paste your functions: start_screen_recording 
-#  and join_meet_automated_and_record here)
-#
-# Example (paste your full function):
 
-def _record_audio_task(filename: str, duration_seconds: int, samplerate: int):
+# --- [HELPER 1] Find the system audio (loopback) device ---
+def find_loopback_device():
+    """Finds the ID of the system's loopback/speaker device for recording."""
+    print("   [Audio] Querying audio devices...")
+    try:
+        devices = sd.query_devices()
+        hostapis = sd.query_hostapis()
+        
+        wasapi_index = -1
+        for i, api in enumerate(hostapis):
+            if api['name'] == 'Windows WASAPI':
+                wasapi_index = i
+                break
+        
+        if wasapi_index == -1:
+            print("   [Audio] ⚠️ Could not find Windows WASAPI. Falling back to default mic.")
+            return None
+
+        default_speaker = hostapis[wasapi_index]['default_output_device']
+        if default_speaker == -1:
+             print("   [Audio] ⚠️ No default WASAPI speaker found. Falling back to default mic.")
+             return None
+
+        speaker_info = devices[default_speaker]
+        print(f"   [Audio] Found default speaker: {speaker_info['name']}")
+
+        # Find the loopback (Stereo Mix) version of this speaker
+        for i, device in enumerate(devices):
+            if (device['hostapi'] == wasapi_index and
+                device['max_input_channels'] > 0 and
+                speaker_info['name'] in device['name'] and
+                'Loopback' in device['name']):
+                
+                print(f"   [Audio] ✅ Found loopback device: {device['name']} (ID: {i})")
+                return i # Return the device ID
+
+        print("   [Audio] ⚠️ No loopback device found. Did you enable 'Stereo Mix' in Sound settings?")
+        print("   [Audio] Falling back to default microphone (will likely fail or record silence).")
+        return None 
+    except Exception as e:
+        print(f"   [Audio] ❌ Error querying audio devices: {e}")
+        return None 
+
+
+# --- [HELPER 2] Record audio in a separate thread ---
+def _record_audio_task(filename: str, duration_seconds: int, samplerate: int, device_id: int | None):
     """
-    A helper function (run in a thread) to record microphone audio
+    A helper function (run in a thread) to record audio
     to a .wav file using sounddevice.
     """
-    print(f"   🎧 Recording microphone... (Target file: {filename})")
-    try:
-        # q = queue.Queue()
-        # This will record from the default input device
-        recording = sd.rec(int(duration_seconds * samplerate), samplerate=samplerate, channels=1, dtype='float32')
-        sd.wait() # Wait until recording is finished
+    if device_id is None:
+        print(f"   🎧 Recording default microphone... (Target file: {filename})")
+    else:
+        print(f"   🎧 Recording system audio (device {device_id})... (Target file: {filename})")
         
-        # Save the recording to a file
+    try:
+        recording = sd.rec(
+            int(duration_seconds * samplerate), 
+            samplerate=samplerate, 
+            channels=1, 
+            device=device_id, 
+            dtype='float32'
+        )
+        sd.wait() # Wait until recording is finished
         sf.write(filename, recording, samplerate)
         print(f"   ✅ Audio recording finished: {filename}")
         
@@ -45,117 +94,126 @@ def _record_audio_task(filename: str, duration_seconds: int, samplerate: int):
         print(f"   ❌ Audio recording thread failed: {e}")
         traceback.print_exc()
 
-# --- [REPLACE with THIS] Screen Recording & Transcription Function ---
+
+# --- [FUNCTION 1] This is called by the thread ---
 def start_screen_recording(duration_seconds: int, output_filename: str):
     """
-    Records the primary screen AND SYSTEM AUDIO, saves video,
-    extracts audio, and transcribes.
-    This version does NOT use 'sounddevice' or 'soundfile'.
+    Records screen AND system audio simultaneously, merges them,
+    and then transcribes the audio.
     """
-    print(f"\n🔴 Recording screen & system audio for {duration_seconds} seconds...")
-    print(f"   Saving video to: {output_filename}")
+    print(f"\n🔴 Recording screen & system audio for {duration_seconds}s...")
+
+    base_name = os.path.splitext(output_filename)[0]
+    temp_video_filename = base_name + "_temp_video.mp4"
+    temp_audio_filename = base_name + "_temp_audio.wav"
+    transcript_filename = base_name + "_transcript.txt"
 
     video_writer = None
-    audio_filename = None
     video_clip = None
     audio_clip = None
+    final_clip = None
 
     try:
-        # --- 1. Video Recording Part (using mss and cv2) ---
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Codec for .mp4
+        # --- Find the audio device ---
+        loopback_device_id = find_loopback_device()
         
-        with mss.mss() as sct:
-            monitor = sct.monitors[1] # Monitor 1 is the primary screen
-            width = monitor["width"]
-            height = monitor["height"]
-            
-        fps = 15.0 # Frame rate (lower = smaller file)
-        video_writer = cv2.VideoWriter(output_filename, fourcc, fps, (width, height))
+        # --- Audio Setup ---
+        if loopback_device_id is not None:
+            device_info = sd.query_devices(loopback_device_id, 'input')
+        else:
+            device_info = sd.query_devices(None, 'input') # Fallback to default mic
+        samplerate = int(device_info['default_samplerate'])
 
+        # --- Start Audio Recording Thread ---
+        audio_thread = threading.Thread(
+            target=_record_audio_task,
+            args=(temp_audio_filename, duration_seconds, samplerate, loopback_device_id),
+            daemon=True
+        )
+        audio_thread.start()
+
+        # --- Video Setup ---
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        with mss.mss() as sct:
+            monitor = sct.monitors[1]
+            width, height = monitor["width"], monitor["height"]
+
+        fps = 15.0
+        video_writer = cv2.VideoWriter(temp_video_filename, fourcc, fps, (width, height))
+
+        # --- Start Video Recording (in main thread) ---
+        print(f"   📺 Recording video...")
         start_time = time.time()
-        print(f"   Recording... (Will stop in {duration_seconds}s)")
         with mss.mss() as sct:
             while (time.time() - start_time) < duration_seconds:
-                # Grab the screen frame
-                img_np = np.array(sct.grab(monitor))
-                # Convert from BGRA (mss format) to BGR (OpenCV format)
-                frame = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
-                video_writer.write(frame)
-        
-        # Release the video file
+                frame = np.array(sct.grab(monitor))
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                video_writer.write(frame_bgr)
+
         video_writer.release()
-        video_writer = None # Mark as released
-        print(f"✅ Screen recording finished: {output_filename}")
+        video_writer = None
+        print(f"   ✅ Video recording finished: {temp_video_filename}")
 
-        # --- 2. Audio Extraction Part (using moviepy) ---
-        print(f"\n🔊 Extracting audio from {output_filename}...")
-        audio_filename = os.path.splitext(output_filename)[0] + ".mp3"
-        
-        video_clip = VideoFileClip(output_filename)
-        audio_clip = video_clip.audio
-        if audio_clip is None:
-             print("   ⚠️ No audio track found in the video recording. This can happen if the system audio was silent or not captured.")
-             return # Exit if no audio
-        
-        audio_clip.write_audiofile(audio_filename, codec='mp3', logger=None)
-        print(f"✅ Audio extracted successfully: {audio_filename}")
-        
-        # Close the clips to free up the file
-        audio_clip.close(); audio_clip = None
-        video_clip.close(); video_clip = None
+        # --- Wait for audio thread to finish ---
+        print("   Waiting for audio thread to complete...")
+        audio_thread.join()
 
-        # --- 3. Transcription Part (using whisper) ---
-        print(f"\n✍️ Transcribing audio using Whisper (this may take time)...")
-        
-        model = whisper.load_model("base") # Or "tiny.en", "base.en"
-        result = model.transcribe(audio_filename, fp16=False) 
+        # --- Merge Audio and Video ---
+        print(f"\n🔀 Merging video and audio into: {output_filename}")
+        if not os.path.exists(temp_audio_filename) or os.path.getsize(temp_audio_filename) == 0:
+            print("   ⚠️ Audio file not found or is empty. Saving video-only.")
+            os.rename(temp_video_filename, output_filename)
+            return  # Can't transcribe
 
-        transcript_text = result["text"]
-        transcript_filename = os.path.splitext(output_filename)[0] + "_transcript.txt"
-        
+        video_clip = VideoFileClip(temp_video_filename)
+        audio_clip = AudioFileClip(temp_audio_filename)
+
+        final_clip = video_clip.set_audio(audio_clip)
+        final_clip.write_videofile(output_filename, codec='libx264', audio_codec='aac', logger=None)
+        print(f"✅ Merge complete: {output_filename}")
+
+        # --- Transcribe ---
+        print(f"\n✍️ Transcribing audio...")
+        model = whisper.load_model("base")
+        result = model.transcribe(temp_audio_filename, fp16=False)
+
         with open(transcript_filename, "w", encoding="utf-8") as f:
-            f.write(transcript_text)
-        
-        print(f"✅ Transcription complete: {transcript_filename}")
+            f.write(result["text"])
+        print(f"✅ Transcription saved: {transcript_filename}")
 
     except Exception as e:
         print(f"❌ Error during recording/transcription: {e}")
-        traceback.print_exc() # Print full error
+        traceback.print_exc()
+
     finally:
-        # Ensure all resources are released
-        if video_writer is not None and video_writer.isOpened():
-            video_writer.release()
-        if audio_clip:
-            audio_clip.close()
-        if video_clip:
-            video_clip.close()
-            
-        # Clean up the temporary audio file
-        if audio_filename and os.path.exists(audio_filename):
-             try:
-                 os.remove(audio_filename)
-                 print(f"🧹 Cleaned up temporary audio file: {audio_filename}")
-             except Exception as del_err:
-                 print(f"   ⚠️ Could not delete temporary audio file {audio_filename}: {del_err}")
-# --- END CORRECT FUNCTION ---
+        # --- Cleanup ---
+        print("\n🧹 Cleaning up temporary files...")
+        if video_writer is not None: video_writer.release()
+        if final_clip: final_clip.close()
+        if video_clip: video_clip.close()
+        if audio_clip: audio_clip.close()
+
+        for temp_file in [temp_video_filename, temp_audio_filename]:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                    print(f"   Removed: {temp_file}")
+                except Exception as del_err:
+                    print(f"   ⚠️ Could not delete temp file: {del_err}")
 
 
-# --- [MODIFIED] Google Meet Automated Join and Record Function ---
+# --- [FUNCTION 2] This is called by the API route ---
 def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int, output_dir: str, user_name: str = "Assistant"):
     """
     Launches a dedicated Selenium browser, grants permissions,
     enters name, clicks Ask to join, and starts recording.
-    This version uses a fresh profile to avoid browser conflicts.
     """
     print(f"\n🚀 Attempting automated join for: {meet_link} as '{user_name}'")
     driver = None
     
     try:
-        # Use undetected_chromedriver
         options = uc.ChromeOptions()
         options.add_argument("--start-maximized")
-
-        # Set preferences for permissions
         prefs = {
             "profile.default_content_setting_values.media_stream_mic": 1,
             "profile.default_content_setting_values.media_stream_camera": 1,
@@ -163,27 +221,21 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
         }
         options.add_experimental_option("prefs", prefs)
 
-        # --- [FIX 1] ---
-        # Explicitly set the Chrome version to match your browser
-        driver = uc.Chrome(options=options, version_main=140)
-        # --- [END FIX] ---
+        driver = uc.Chrome(options=options, version_main=None) # Auto-detect version
 
         print("   Navigating to Google Meet link...")
         driver.get(meet_link)
-        time.sleep(3) # Give page a moment to load
+        time.sleep(3) 
 
         # --- Wait for name input field and enter name ---
-        # (This is from your working code, it's good)
         try:
             print("   Waiting for name input field...")
             name_input = None
-            # Look for the input field to type a name
             name_selectors = [
                 (By.CSS_SELECTOR, "input[aria-label='Your name']"),
                 (By.CSS_SELECTOR, "input[placeholder='Your name']"),
                 (By.XPATH, "//input[@type='text' and contains(@aria-label, 'name')]")
             ]
-
             for by_type, selector in name_selectors:
                 try:
                     name_input = WebDriverWait(driver, 10).until(
@@ -192,23 +244,20 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
                     print(f"   ✅ Found name input using: {selector}")
                     break
                 except TimeoutException:
-                    continue # Try next selector
+                    continue 
 
             if name_input:
                 driver.execute_script("arguments[0].click();", name_input)
-                time.sleep(0.5)
-                name_input.clear()
-                time.sleep(0.5)
+                time.sleep(0.5); name_input.clear(); time.sleep(0.5)
                 name_input.send_keys(user_name)
                 print(f"   ✅ Typed name: {user_name}")
             else:
-                print("   ⚠️ Name input field not found. Trying to join anyway (might be pre-filled).")
+                print("   ⚠️ Name input field not found. Trying to join anyway.")
         except Exception as e:
             print(f"   ⚠️ Error entering name: {e}")
             traceback.print_exc()
 
         # --- Wait and click "Ask to join" or "Join now" button ---
-        # (This is also from your working code)
         try:
             print("   Waiting for join button to become clickable...")
             join_button = None
@@ -216,7 +265,6 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
                 (By.XPATH, "//button[.//span[contains(text(), 'Ask to join')]]"),
                 (By.XPATH, "//button[.//span[contains(text(), 'Join now')]]")
             ]
-
             for by_type, selector in button_selectors:
                 try:
                     join_button = WebDriverWait(driver, 15).until(
@@ -226,11 +274,10 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
                     break
                 except TimeoutException:
                     continue
-
             if join_button:
                 button_text = join_button.text or "Join"
                 print(f"   ✅ Clicking '{button_text}' button...")
-                driver.execute_script("arguments[0].click();", join_button) # JS click
+                driver.execute_script("arguments[0].click();", join_button)
                 print(f"   ✅ Successfully clicked button.")
                 time.sleep(5) # Wait for meeting to load
             else:
@@ -246,17 +293,11 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
         output_filepath = os.path.join(output_dir, f"meet_recording_{timestamp}.mp4")
 
         rec_thread = threading.Thread(
-            target=start_screen_recording,
+            target=start_screen_recording, # This now calls the correct function
             args=(duration_sec, output_filepath),
             daemon=True
         )
         rec_thread.start()
-        
-        # --- [FIX 2] ---
-        # REMOVED rec_thread.join()
-        # This was a bug. Removing it lets the recording run in the background
-        # and allows this function to return immediately.
-        # --- [END FIX] ---
         
         print(f"🔴 Recording thread started in background for {record_duration_minutes} min.")
 
@@ -266,7 +307,5 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
     finally:
         print("   Automated join function finished (browser instance may remain open).")
         # We don't quit the driver here, as it would close the meeting.
-        # The browser will close when the main app.py script is stopped.
 
     return schedule.CancelJob
-# --- END Automated Meet Function ---

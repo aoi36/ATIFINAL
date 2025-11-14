@@ -19,6 +19,7 @@ LMS_USERNAME = os.environ.get("LMS_USERNAME")
 LMS_PASSWORD = os.environ.get("LMS_PASSWORD")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 GMAIL_SENDER = os.environ.get("GMAIL_SENDER")
+SECRET_KEY = "63f4945d921d599f27ae4fdf5bada3f1"
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
 GMAIL_RECEIVER = os.environ.get("GMAIL_RECEIVER")
 

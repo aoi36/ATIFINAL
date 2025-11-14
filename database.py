@@ -1,4 +1,3 @@
-# database.py
 import sqlite3
 import os
 from flask import g
@@ -19,27 +18,68 @@ def close_connection(exception):
 
 def init_db(db_conn):
     """Initializes the database by creating tables. schema.sql is no longer needed."""
-    print("   [DB] Defining schema...")
+    print("   [DB] Defining new multi-user schema...")
+    
+    # --- [MODIFIED] SQL Schema is now multi-user ---
     schema_script = """
-    PRAGMA foreign_keys = ON;
+    PRAGMA foreign_keys = ON; /* Enforce foreign key constraints */
+
+    /* 1. New User table (stores login) */
+    CREATE TABLE IF NOT EXISTS user (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lms_username TEXT UNIQUE NOT NULL,
+      hashed_password TEXT NOT NULL  /* <--- MODIFIED */
+    );
+
+    /* 2. Courses table (now linked to a user) */
     CREATE TABLE IF NOT EXISTS courses (
-      course_id INTEGER PRIMARY KEY, name TEXT NOT NULL, url TEXT
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lms_course_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      url TEXT,
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
     );
+
+    /* 3. Deadlines table (now linked to a user and the new course ID) */
     CREATE TABLE IF NOT EXISTS deadlines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, course_id INTEGER NOT NULL, status TEXT,
-      time_string TEXT, parsed_iso_date TEXT, url TEXT NOT NULL,
-      FOREIGN KEY (course_id) REFERENCES courses (course_id) ON DELETE CASCADE
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER NOT NULL,      /* Links to 'courses.id' (our local PK) */
+      status TEXT,
+      time_string TEXT,
+      parsed_iso_date TEXT,
+      url TEXT NOT NULL,
+      is_completed INTEGER DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
     );
+
+    /* 4. User Content table (now linked to a user and the new course ID) */
     CREATE TABLE IF NOT EXISTS user_content (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, course_id INTEGER NOT NULL, source_file TEXT NOT NULL,
-      type TEXT NOT NULL, user_question TEXT, content_json TEXT NOT NULL,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER NOT NULL,
+      source_file TEXT NOT NULL,
+      type TEXT NOT NULL,
+      user_question TEXT,
+      content_json TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (course_id) REFERENCES courses (course_id) ON DELETE CASCADE
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS jwt_blocklist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jti TEXT NOT NULL UNIQUE,  /* 'jti' is the unique ID of a JWT */
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
+    # --- End SQL Schema ---
+
     print("   [DB] Executing schema...")
     try:
-        db_conn.executescript(schema_script)
+        db_conn.executescript(schema_script) # Execute the schema script
         db_conn.commit()
         print("   [DB] Database tables created successfully.")
     except Exception as e:
@@ -48,21 +88,35 @@ def init_db(db_conn):
         raise
 
 def setup_database():
-    """Ensures the DB file AND tables exist before starting."""
+    """
+    Ensures the DB file AND tables exist before starting.
+    This runs once at app startup, outside a request context.
+    """
     print("[DB] Checking database integrity...")
-    db = None
+    db = None # Initialize
     try:
+        # Connect directly, not using Flask's 'g' object
         db = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES)
         cursor = db.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='courses'")
-        if cursor.fetchone():
+        
+        # Check if the 'user' table exists (our new base table)
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user'")
+        table_exists = cursor.fetchone()
+        
+        if table_exists:
             print("[DB] Database tables already exist.")
         else:
+            # If the file exists but tables are missing
             print("[DB] Tables not found. Initializing database...")
-            init_db(db)
+            # Pass the connection to init_db
+            init_db(db) # This function will create tables and commit
+            
     except Exception as e:
         print(f"[DB] ❌ Error during database setup: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         if db:
             db.close()
             print("[DB] Database check complete.")
+# --- END NEW DB HELPERS ---

@@ -20,6 +20,7 @@ from selenium.webdriver.common.by import By
 # ... (all other imports needed for scraping: requests, bs4, docx, pptx, pdfplumber, etc.)
 from datetime import datetime
 from dateutil import parser as date_parser
+import traceback
 
 # Import from our new modules
 import state
@@ -27,7 +28,7 @@ from config import (
     DATABASE_FILE, SAVE_DIR, LMS_USERNAME, LMS_PASSWORD, STATE_FILE,
     REQUESTS_TIMEOUT, MAX_SUBPAGES, MAX_TEXT_LENGTH_FOR_SUMMARY
 )
-from search_service import clear_search_index
+from search_service import clear_search_index, get_index
 # Note: AI functions are no longer called from here, so we don't import them.
 # Import the file-reading and deadline-parsing helpers
 # (Paste clean_file_text, parse_time_remaining, read_docx, read_pptx, read_pdf, download_file here)
@@ -67,25 +68,39 @@ def convert_to_pdf(file_path, output_dir):
             pdf_path = os.path.join(output_dir, pdf_filename)
             
             if os.path.exists(pdf_path):
-                print(f"   [Converter] ✅ Successfully converted to {pdf_filename}")
+                print(f"   [Converter]  Successfully converted to {pdf_filename}")
                 return pdf_path
             else:
-                print(f"   [Converter] ⚠️ Conversion command ran, but output PDF not found.")
+                print(f"   [Converter]  Conversion command ran, but output PDF not found.")
                 print(f"   [Converter] STDOUT: {result.stdout}")
                 print(f"   [Converter] STDERR: {result.stderr}")
                 return None
         else:
-            print(f"   [Converter] ❌ Conversion failed. Return code: {result.returncode}")
+            print(f"   [Converter]  Conversion failed. Return code: {result.returncode}")
             print(f"   [Converter] STDERR: {result.stderr}")
             return None
             
     except subprocess.TimeoutExpired:
-        print(f"   [Converter] ❌ ERROR: Conversion for {os.path.basename(file_path)} timed out.")
+        print(f"   [Converter]  ERROR: Conversion for {os.path.basename(file_path)} timed out.")
         return None
     except Exception as e:
-        print(f"   [Converter] ❌ An unexpected error occurred during conversion: {e}")
+        print(f"   [Converter]  An unexpected error occurred during conversion: {e}")
         return None
 # --- [END MODIFIED HELPER] ---
+
+def find_course_db_id(cursor, user_id, lms_course_id):
+    """Finds the local primary key (id) of a course from its LMS ID."""
+    try:
+        cursor.execute(
+            "SELECT id FROM courses WHERE user_id = ? AND lms_course_id = ?",
+            (user_id, lms_course_id)
+        )
+        result = cursor.fetchone()
+        if result:
+            return result['id']
+    except Exception as e:
+        print(f"   [DB] ⚠️ Error finding course_db_id: {e}")
+    return None
 
 def download_file(url, folder, cookies, headers, link_text="") -> str | None:
     filename = None
@@ -192,7 +207,7 @@ def download_file(url, folder, cookies, headers, link_text="") -> str | None:
 
         # Check if file is empty, might indicate an issue despite 200 OK
         if bytes_written == 0 and os.path.exists(local_path):
-             print(f"         ⚠️ WARNING: Downloaded file is empty: {local_path}")
+             print(f"          WARNING: Downloaded file is empty: {local_path}")
              # Optionally delete empty file: os.remove(local_path); return None
 
 
@@ -202,19 +217,19 @@ def download_file(url, folder, cookies, headers, link_text="") -> str | None:
 
     # --- Specific Exception Handling ---
     except requests.exceptions.HTTPError as http_e:
-        print(f"         ⚠️ Failed download {url} (HTTP Error): {http_e.response.status_code} {http_e.response.reason}") # DEBUG
+        print(f"          Failed download {url} (HTTP Error): {http_e.response.status_code} {http_e.response.reason}") # DEBUG
         return None
     except requests.exceptions.Timeout:
-        print(f"         ⚠️ Failed download {url} (Timeout after {REQUESTS_TIMEOUT}s or {REQUESTS_TIMEOUT*2}s)") # DEBUG
+        print(f"         Failed download {url} (Timeout after {REQUESTS_TIMEOUT}s or {REQUESTS_TIMEOUT*2}s)") # DEBUG
         return None
     except requests.exceptions.ConnectionError as conn_e:
-        print(f"         ⚠️ Failed download {url} (Connection Error): {conn_e}") # DEBUG
+        print(f"          Failed download {url} (Connection Error): {conn_e}") # DEBUG
         return None
     except requests.exceptions.RequestException as req_e:
-        print(f"         ⚠️ Failed download {url} (General Request Error): {req_e}") # DEBUG
+        print(f"          Failed download {url} (General Request Error): {req_e}") # DEBUG
         return None
     except Exception as e:
-        print(f"         ⚠️ Failed download {url} (Other Error): {e}") # DEBUG
+        print(f"          Failed download {url} (Other Error): {e}") # DEBUG
         # Clean up partial file if it exists and path was determined
         if local_path and os.path.exists(local_path):
              try:
@@ -527,7 +542,7 @@ from config import GMAIL_SENDER, GMAIL_APP_PASSWORD, GMAIL_RECEIVER
 def send_email_notification(subject, body):
     """Sends an email using Gmail credentials from .env."""
     if not GMAIL_SENDER or not GMAIL_APP_PASSWORD or not GMAIL_RECEIVER:
-        print("   [Email] ⚠️ Gmail credentials (SENDER, APP_PASSWORD, RECEIVER) not set. Skipping notification.")
+        print("   [Email]  Gmail credentials (SENDER, APP_PASSWORD, RECEIVER) not set. Skipping notification.")
         return
 
     print(f"   [Email] Connecting to Gmail to send notification to {GMAIL_RECEIVER}...")
@@ -545,36 +560,37 @@ def send_email_notification(subject, body):
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
             smtp.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
             smtp.send_message(msg)
-        print("   [Email] ✅ Notification email sent successfully.")
+        print("   [Email]  Notification email sent successfully.")
     except Exception as e:
-        print(f"   [Email] ❌ Failed to send email: {e}")
+        print(f"   [Email]  Failed to send email: {e}")
 
 
-# --- Main Scrape Function ---
-def perform_full_scrape(lms_user, lms_pass):
-    """The main scraping process, designed to run in a background thread."""
+def perform_full_scrape(user_id, lms_user, lms_pass):
+    """
+    The main scraping process, modified to run for a *specific user*.
+    """
     if state.IS_SCRAPING:
         print("Scrape already in progress.")
         return
     
     state.IS_SCRAPING = True
-    print(f"\n🚀 Starting full scrape for user {lms_user}...")
+    print(f"\n🚀 Starting full scrape for user {lms_user} (ID: {user_id})...")
     
     driver = None
     db = None 
     cursor = None
     index_writer = None
-    # ----------------------------------------
     
-    # --- State Tracking Variables ---
-    print("   [State] Loading old scrape state...")
+    # --- [MODIFIED] User-specific state file ---
+    user_state_file = f"{os.path.splitext(STATE_FILE)[0]}_{user_id}.json"
+    print(f"   [State] Loading old state from {user_state_file}...")
     old_state = {"deadlines": [], "files": []}
     try:
-        if os.path.exists(STATE_FILE):
-            with open(STATE_FILE, 'r', encoding='utf-8') as f:
+        if os.path.exists(user_state_file):
+            with open(user_state_file, 'r', encoding='utf-8') as f:
                 old_state = json.load(f)
         else:
-             print("   [State] No old state file found, will treat all findings as new.")
+             print("   [State] No old state file found for this user.")
     except Exception as e:
         print(f"   [State] ⚠️ Could not load old state file: {e}")
     
@@ -645,13 +661,13 @@ def perform_full_scrape(lms_user, lms_pass):
                     m3 = re.search(r'"sesskey"\s*:\s*"([^"]+)"', page_source); sesskey = m3.group(1) if m3 else None
 
                 if not sesskey:
-                    print("      ❌ Failed to extract sesskey from /my/courses.php.")
+                    print("      Failed to extract sesskey from /my/courses.php.")
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     try:
                          driver.save_screenshot(f"sesskey_fail_screenshot_{timestamp}.png")
                          with open(f"sesskey_fail_source_{timestamp}.html", "w", encoding="utf-8") as f: f.write(page_source)
-                         print(f"         📸📄 Saved debug info for sesskey failure.")
-                    except Exception as save_e: print(f"         ⚠️ Could not save debug info: {save_e}")
+                         print(f"         Saved debug info for sesskey failure.")
+                    except Exception as save_e: print(f"         Could not save debug info: {save_e}")
                     raise ValueError("Sesskey not found post-login")
 
                 print(f"      🔑 Sesskey: {sesskey}")
@@ -690,33 +706,47 @@ def perform_full_scrape(lms_user, lms_pass):
                                   for c in json_data[0].get("data", {}).get("courses", [])]
         else: print(f"   ❌ AJAX error: {json_data}"); raise ValueError("Course fetch failed")
 
-        # --- 6. [DB] Clear old data and insert new courses ---
-        print("   [DB] Clearing old courses and deadlines...")
-        cursor.execute('DELETE FROM deadlines')
-        cursor.execute('DELETE FROM courses')
-        print(f"   [DB] Inserting {len(simplified_courses)} new courses...")
+        # --- 6. [DB-MODIFIED] Clear old data FOR THIS USER and insert new courses ---
+        print(f"   [DB] Clearing old courses and associated data for user_id {user_id}...")
+        # "ON DELETE CASCADE" in the schema will auto-delete related deadlines/content
+        cursor.execute("DELETE FROM courses WHERE user_id = ?", (user_id,))
+        
+        print(f"   [DB] Inserting {len(simplified_courses)} new courses for user_id {user_id}...")
+        course_id_map = {} # Map LMS ID -> new local DB ID
         for course in simplified_courses:
+             lms_course_id = course.get('id')
              cursor.execute(
-                 'INSERT INTO courses (course_id, name, url) VALUES (?, ?, ?)',
-                 (course.get('id'), course.get('name'), course.get('url'))
+                 'INSERT INTO courses (lms_course_id, user_id, name, url) VALUES (?, ?, ?, ?)',
+                 (lms_course_id, user_id, course.get('name'), course.get('url'))
              )
+             course_id_map[lms_course_id] = cursor.lastrowid # Get the new local 'id' (from courses.id)
         print(f"   📝 Saved {len(simplified_courses)} courses to database.")
-        # --- [END DB] ---
+        # --- [END DB-MODIFIED] ---
 
-        # --- 7. [Whoosh] Prepare Search Index ---
-        print("   [Search] Clearing and opening index writer...")
-        search_index = clear_search_index()
+        # --- 7. [Whoosh-MODIFIED] Prepare Search Index ---
+        print("   [Search] Opening index writer...")
+        search_index = get_index() # Get the index (defined in search_service.py)
         index_writer = search_index.writer()
-        # --- [END Whoosh] ---
+        
+        # Delete old documents for *this user* only
+        print(f"   [Search] Deleting old index entries for user_id {user_id}...")
+        index_writer.delete_by_term('user_id', str(user_id))
+        # --- [END Whoosh-MODIFIED] ---
 
         # --- 8. Course Processing Loop ---
         for course in simplified_courses:
-            course_id = course.get("id"); course_name = course.get("name", "N/A"); course_url = course.get("url")
+            lms_course_id = course.get("id") # This is the ID from Moodle (e.g., 473)
+            course_db_id = course_id_map.get(lms_course_id) # This is the local DB primary key (e.g., 1)
+            course_name = course.get("name", "N/A"); course_url = course.get("url")
+            
+            if not course_url or not course_db_id:
+                print(f"   [DB] ⚠️ Error mapping course ID {lms_course_id}, skipping."); continue
+
             safe_course_name = re.sub(r'[\\/*?:"<>|]', "_", course_name).strip()[:150]
-            course_folder = os.path.join(SAVE_DIR, f"{course_id}_{safe_course_name}")
-            os.makedirs(course_folder, exist_ok=True)
-            print(f"\n   📘 Processing course {course_id} - {course_name}")
-            if not course_url: print("      ⚠️ No URL, skipping."); continue
+            # [MODIFIED] Folder name is now user-specific
+            user_specific_folder = os.path.join(SAVE_DIR, f"user_{user_id}", f"{lms_course_id}_{safe_course_name}")
+            os.makedirs(user_specific_folder, exist_ok=True)
+            print(f"\n   📘 Processing course {lms_course_id} - {course_name}")
 
             try:
                 driver.get(course_url)
@@ -724,7 +754,7 @@ def perform_full_scrape(lms_user, lms_pass):
             except Exception as e: print(f"      ⚠️ Failed load main page: {e}"); continue
 
             main_page_source = driver.page_source
-            main_filename = os.path.join(course_folder, "main_page.html")
+            main_filename = os.path.join(user_specific_folder, "main_page.html")
             with open(main_filename, "w", encoding="utf-8") as fh: fh.write(main_page_source)
             print(f"      💾 Saved main HTML -> {main_filename}")
 
@@ -766,90 +796,70 @@ def perform_full_scrape(lms_user, lms_pass):
                                  (link_text and any(link_text.lower().endswith(ext) for ext in file_extensions))
 
                 if is_direct_file:
-                    local_path = download_file(href, course_folder, cookies_dict, headers, link_text)
+                    local_path = download_file(href, user_specific_folder, cookies_dict, headers, link_text)
                     if local_path:
-                        # --- [STATE] Track this file ---
                         all_found_file_names.add(os.path.basename(local_path))
-                        # -----------------------------
-                        
-                        extracted_text=None
-                        file_type="Unknown"
-                        file_ext_lower=os.path.splitext(local_path)[1].lower()
+                        extracted_text=None; file_type="Unknown"; file_ext_lower=os.path.splitext(local_path)[1].lower()
 
-                        # --- [FIXED LOGIC] ---
-                        # Check for readable types first
                         if file_ext_lower == ".docx":
-                            file_type="Word"
-                            extracted_text=read_docx(local_path)
-                            # Convert this file
-                            convert_to_pdf(local_path, course_folder) 
-                        
+                            file_type="Word"; extracted_text=read_docx(local_path)
+                            if extracted_text: # Only convert if we can read it
+                                try: driver.current_url # Keep-alive ping
+                                except Exception: pass # Ignore if driver connection is lost
+                                convert_to_pdf(local_path, user_specific_folder) 
                         elif file_ext_lower == ".pptx":
-                            file_type="PowerPoint"
-                            extracted_text=read_pptx(local_path)
-                            # Convert this file
-                            convert_to_pdf(local_path, course_folder)
-                        
+                            file_type="PowerPoint"; extracted_text=read_pptx(local_path)
+                            if extracted_text: # Only convert if we can read it
+                                try: driver.current_url # Keep-alive ping
+                                except Exception: pass
+                                convert_to_pdf(local_path, user_specific_folder)
                         elif file_ext_lower == ".pdf":
-                            file_type="PDF"
-                            extracted_text=read_pdf(local_path)
-                            # It's already a PDF, no conversion needed.
+                            file_type="PDF"; extracted_text=read_pdf(local_path)
                         
-                        # Now, index the text if we found any
                         if extracted_text:
                             cleaned_text = clean_file_text(extracted_text)
                             txt_fname = f"{os.path.splitext(os.path.basename(local_path))[0]}.txt"
-                            txt_fpath = os.path.join(course_folder, txt_fname)
+                            txt_fpath = os.path.join(user_specific_folder, txt_fname)
                             with open(txt_fpath, "w", encoding="utf-8") as f: f.write(cleaned_text)
                             print(f"            💾 Saved cleaned text -> {txt_fpath}")
 
                             print(f"            [Search] Indexing {os.path.basename(local_path)}...")
                             index_writer.add_document(
-                                course_id=str(course_id), course_name=course_name,
+                                user_id=str(user_id), # [MODIFIED]
+                                course_id=str(lms_course_id), # Use LMS ID for search consistency
+                                course_name=course_name,
                                 file_name=os.path.basename(local_path),
                                 file_type=file_type, content=cleaned_text
                             )
-                        elif file_ext_lower in ('.zip', '.rar'):
-                            print("            ➖ Skipping text extraction (archive file).")
-                        elif file_ext_lower not in ('.docx', '.pptx', '.pdf'):
-                            print(f"            ➖ Skipping text extraction (unsupported file: {file_ext_lower}).")
-                        # --- [END FIXED LOGIC] ---
-                    continue # Next link in main list
+                        elif not extracted_text: print("            ➖ Skipping (no text/unsupported/archive).")
+                    continue 
 
-               # --- Process as HTML Page ---
+                # --- Process as HTML Page ---
                 else:
                     try:
                         print("         📄 Visiting as HTML page...")
                         driver.get(href)
                         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                        time.sleep(1) # Small delay for JS rendering
+                        time.sleep(1)
                         current_page_source = driver.page_source
                     except Exception as e:
-                        print(f"            ⚠️ Failed load page: {e}")
-                        continue # Skip to the next link in the main list
+                        print(f"            ⚠️ Failed load page: {e}"); continue
 
-                    # Save HTML of this sub-page
-                    parsed=urllib.parse.urlparse(href); path_part=parsed.path.strip("/") or "root"; query_part=parsed.query.replace("&","_").replace("=","-")
-                    safe_subname=re.sub(r'[\\/*?:"<>|]', "_", f"{idx}_{path_part}" + (f"_{query_part}" if query_part else ""))[:200]
-                    sub_filename=os.path.join(course_folder, f"{safe_subname}.html")
+                    safe_subname=re.sub(r'[\\/*?:"<>|]', "_", f"{idx}_{urllib.parse.quote_plus(href)}")[:200]
+                    sub_filename=os.path.join(user_specific_folder, f"{safe_subname}.html")
                     try:
                         with open(sub_filename, "w", encoding="utf-8") as fh: fh.write(current_page_source)
                         print(f"            💾 Saved HTML -> {sub_filename}")
-                    except Exception as save_html_e:
-                        print(f"            ⚠️ Failed to save HTML for {href}: {save_html_e}")
+                    except Exception as save_html_e: print(f"            ⚠️ Failed to save HTML: {save_html_e}")
 
                     # --- Find and Process Nested File Links ---
                     try:
                         print("         DEBUG: Waiting up to 10s for nested pluginfile links...")
                         try:
-                            WebDriverWait(driver, 10).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='pluginfile.php']"))
-                            )
+                            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='pluginfile.php']")))
                             nested_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='pluginfile.php']")
                             print(f"         DEBUG: Found {len(nested_links)} potential nested links after wait.")
-                        except TimeoutException:
-                            print("         ➖ No nested pluginfile links found within 10 seconds.")
-                            nested_links = []
+                        except TimeoutException: nested_links = []
 
                         unique_nested_hrefs = set()
                         processed_nested_count = 0
@@ -868,147 +878,133 @@ def perform_full_scrape(lms_user, lms_pass):
                                           try: f_link_text=file_link_element.find_element(By.CSS_SELECTOR, "span.fp-filename").text.strip()
                                           except: f_link_text=os.path.basename(urllib.parse.urlparse(f_href).path)
 
-                                     print(f"            📂 Processing nested file [{processed_nested_count}]: {f_href} (Text: '{f_link_text}')")
-                                     nested_local_path = download_file(f_href, course_folder, cookies_dict, headers, f_link_text)
+                                     print(f"            📂 Processing nested file: {f_href} (Text: '{f_link_text}')")
+                                     nested_local_path = download_file(f_href, user_specific_folder, cookies_dict, headers, f_link_text)
                                      
                                      if nested_local_path:
                                           all_found_file_names.add(os.path.basename(nested_local_path))
                                           extracted_text=None; file_type="Unknown"; file_ext_lower=os.path.splitext(nested_local_path)[1].lower()
 
-                                          # --- [CORRECT LOGIC] ---
                                           if file_ext_lower == ".docx":
                                               file_type="Word"; extracted_text=read_docx(nested_local_path)
-                                              convert_to_pdf(nested_local_path, course_folder) # Call convert
+                                              if extracted_text: 
+                                                  try: driver.current_url # Ping
+                                                  except Exception: pass
+                                                  convert_to_pdf(nested_local_path, user_specific_folder)
                                           elif file_ext_lower == ".pptx":
                                               file_type="PowerPoint"; extracted_text=read_pptx(nested_local_path)
-                                              convert_to_pdf(nested_local_path, course_folder) # Call convert
+                                              if extracted_text:
+                                                  try: driver.current_url # Ping
+                                                  except Exception: pass
+                                                  convert_to_pdf(nested_local_path, user_specific_folder)
                                           elif file_ext_lower == ".pdf":
                                               file_type="PDF"; extracted_text=read_pdf(nested_local_path)
                                           
                                           if extracted_text:
                                                cleaned_text = clean_file_text(extracted_text)
                                                txt_fname=f"{os.path.splitext(os.path.basename(nested_local_path))[0]}.txt"
-                                               txt_fpath=os.path.join(course_folder, txt_fname)
+                                               txt_fpath=os.path.join(user_specific_folder, txt_fname)
                                                with open(txt_fpath, "w", encoding="utf-8") as f: f.write(cleaned_text)
                                                print(f"               💾 Saved cleaned text -> {txt_fpath}")
 
                                                print(f"               [Search] Indexing {os.path.basename(nested_local_path)}...")
                                                index_writer.add_document(
-                                                   course_id=str(course_id), course_name=course_name,
+                                                   user_id=str(user_id),
+                                                   course_id=str(lms_course_id),
+                                                   course_name=course_name,
                                                    file_name=os.path.basename(nested_local_path),
                                                    file_type=file_type, content=cleaned_text
                                                )
                                           elif not extracted_text: print("               ➖ Skipping nested analysis (no text/unsupported/archive).")
-                                          # --- [END CORRECT LOGIC] ---
-                                     else: 
-                                         print(f"            ❌ Nested download FAILED for {f_href}.")
+                                     else: print(f"            ❌ Nested download FAILED for {f_href}.")
                                  except Exception as nested_proc_e:
                                      print(f"               ⚠️ Error processing nested link {f_href or 'unknown'}: {nested_proc_e}")
-                            
-                            if processed_nested_count == 0 and nested_links:
-                                 print("         ➖ No unique/valid nested pluginfile links after filtering.")
                         
                     except Exception as sub_e:
                         print(f"            ⚠️ Error finding/processing nested links: {sub_e}")
-                    # --- End Nested File Link Processing ---
 
                     # --- Check Deadlines ---
                     if "mod/assign/" in href or "mod/quiz/" in href:
                         deadline_info = get_deadline_info(current_page_source)
                         if deadline_info:
                             all_found_deadline_urls.add(href) 
-                            deadline_info["url"] = href
                             original_time_str = deadline_info.get("time")
                             iso_timestamp = None
                             
                             if original_time_str and deadline_info.get("status") == "Due":
-                                try:
-                                    parsed_datetime = date_parser.parse(original_time_str, fuzzy=True)
-                                    iso_timestamp = parsed_datetime.isoformat()
-                                except Exception as parse_e:
-                                    print(f"               ⚠️ Could not parse deadline string '{original_time_str}': {parse_e}")
-                            
+                                try: iso_timestamp = date_parser.parse(original_time_str, fuzzy=True).isoformat()
+                                except Exception as parse_e: print(f"               ⚠️ Could not parse deadline: {parse_e}")
                             elif original_time_str and deadline_info.get("status") == "Time Remaining":
                                 time_delta = parse_time_remaining(original_time_str)
-                                if time_delta:
-                                    now_local = datetime.now()
-                                    calculated_due_date = now_local + time_delta
-                                    iso_timestamp = calculated_due_date.isoformat()
-                                else:
-                                    print(f"               ⚠️ Could not calculate relative time: '{original_time_str}'")
+                                if time_delta: iso_timestamp = (datetime.now() + time_delta).isoformat()
+                                else: print(f"               ⚠️ Could not calculate relative time: '{original_time_str}'")
 
+                            # [MODIFIED] Add user_id and new course_db_id
                             deadlines_to_add.append((
-                                course_id, deadline_info.get('status'),
-                                deadline_info.get('time'), iso_timestamp, href
+                                user_id, 
+                                course_db_id, # The local DB ID
+                                deadline_info.get('status'),
+                                deadline_info.get('time'), 
+                                iso_timestamp, 
+                                href
                             ))
-                            print(f"            🎯 Deadline Found (Method: {deadline_info.get('method', 'N/A')}): {deadline_info.get('status','N/A')} - {original_time_str}")
+                            print(f"            🎯 Deadline Found (Method: {deadline_info.get('method', 'N/A')})")
+            # --- End Subpage Loop ---
 
             # --- Save deadlines for this course to DB ---
             if deadlines_to_add:
-                print(f"      [DB] Inserting {len(deadlines_to_add)} deadlines for course {course_id}...")
+                print(f"      [DB] Inserting {len(deadlines_to_add)} deadlines for course {lms_course_id}...")
                 cursor.executemany(
-                    'INSERT INTO deadlines (course_id, status, time_string, parsed_iso_date, url) VALUES (?, ?, ?, ?, ?)',
+                    'INSERT INTO deadlines (user_id, course_db_id, status, time_string, parsed_iso_date, url) VALUES (?, ?, ?, ?, ?, ?)',
                     deadlines_to_add
                 )
         # --- End Course Loop ---
 
         # --- 10. Commit all changes ---
         print("\n   [Search] Committing index writer...")
-        index_writer.commit()
-        index_writer = None # Mark as committed
+        index_writer.commit(); index_writer = None
         print("   [Search] Index commit complete.")
 
         print("\n   [DB] Committing all scrape data to database...")
-        db.commit() # Commit all DB inserts/deletes
+        db.commit()
         
-        # --- [NEW] Compare State and Send Notification ---
+        # --- [MODIFIED] State comparison & notification ---
         print("\n   [State] Comparing scrape results to previous state...")
         old_deadline_set = set(old_state.get("deadlines", []))
         old_file_set = set(old_state.get("files", []))
 
-        # Find items in the new sets that were not in the old sets
         new_deadlines = all_found_deadline_urls - old_deadline_set
         new_files = all_found_file_names - old_file_set
         
         email_body_lines = []
-        email_subject = "LMS Assistant: No New Updates"
-
         if new_deadlines:
             print(f"   [State] ✅ Found {len(new_deadlines)} new/updated deadline(s)!")
             email_body_lines.append(f"Found {len(new_deadlines)} new or changed deadline pages:")
-            for url in new_deadlines:
-                email_body_lines.append(f"- {url}")
+            for url in new_deadlines: email_body_lines.append(f"- {url}")
         
         if new_files:
             print(f"   [State] ✅ Found {len(new_files)} new file(s)!")
             email_body_lines.append(f"\nFound {len(new_files)} new file(s):")
-            for name in new_files:
-                email_body_lines.append(f"- {name}")
+            for name in new_files: email_body_lines.append(f"- {name}")
         
         if not new_deadlines and not new_files:
             print("   [State] ➖ No new deadlines or files found.")
         
-        # Send email only if there are updates
-        if email_body_lines:
+        if email_body_lines: # Send email if there are updates
             email_subject = f"LMS Assistant: {len(new_deadlines)} New Deadlines, {len(new_files)} New Files!"
             final_email_body = "Your LMS Assistant scrape found the following updates:\n\n" + "\n".join(email_body_lines)
             send_email_notification(email_subject, final_email_body)
         
-        # Save the *current* state for next time
-        print("   [State] Saving current state...")
-        new_state_data = {
-            "deadlines": list(all_found_deadline_urls),
-            "files": list(all_found_file_names)
-        }
-        with open(STATE_FILE, 'w', encoding='utf-8') as f:
+        print(f"   [State] Saving current state to {user_state_file}...")
+        new_state_data = {"deadlines": list(all_found_deadline_urls), "files": list(all_found_file_names)}
+        with open(user_state_file, 'w', encoding='utf-8') as f:
             json.dump(new_state_data, f, indent=4)
-        # --- [END NEW] ---
+        # --- [END MODIFIED] ---
         
         print("\n✅ Full scrape completed successfully.")
 
     except Exception as scrape_e:
         print(f"\n❌ An error occurred during scraping: {scrape_e}")
-        import traceback
         traceback.print_exc()
         if db:
              print("   [DB] Rolling back database changes due to error.")
@@ -1025,3 +1021,4 @@ def perform_full_scrape(lms_user, lms_pass):
             driver.quit()
         state.IS_SCRAPING = False # Reset flag
         print("   Scrape function finished.")
+# ==============================================================================
