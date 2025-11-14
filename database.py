@@ -28,7 +28,8 @@ def init_db(db_conn):
     CREATE TABLE IF NOT EXISTS user (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lms_username TEXT UNIQUE NOT NULL,
-      hashed_password TEXT NOT NULL  /* <--- MODIFIED */
+      hashed_password TEXT NOT NULL,  /* <--- MODIFIED */
+      google_calendar_id TEXT DEFAULT 'primary'
     );
 
     /* 2. Courses table (now linked to a user) */

@@ -1,5 +1,6 @@
 # routes.py
 import os
+import base64
 import json
 import threading
 import re
@@ -8,6 +9,8 @@ import sqlite3
 from whoosh.highlight import ContextFragmenter, PinpointFragmenter
 from whoosh.qparser import QueryParser
 import jwt
+import pytz
+from google.oauth2 import service_account
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 import traceback # Import traceback for error logging
@@ -16,6 +19,7 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta, timezone
+from googleapiclient.discovery import build
 
 # Import services and helpers
 import state
@@ -23,7 +27,7 @@ import schedule # For the meet scheduler
 from database import get_db
 from config import (
     UPLOAD_FOLDER, MEET_RECORDING_DIR, SAVE_DIR, ALLOWED_EXTENSIONS,
-    MAX_TEXT_LENGTH_FOR_SUMMARY, SECRET_KEY
+    MAX_TEXT_LENGTH_FOR_SUMMARY, SECRET_KEY, GOOGLE_CALENDAR_ID, GOOGLE_CALENDAR_TIMEZONE, LMS_USERNAME, LMS_PASSWORD, GOOGLE_SERVICE_ACCOUNT_FILE
 )
 from scraper_service import (
     perform_full_scrape, read_pdf, read_docx, read_pptx, read_txt
@@ -36,9 +40,28 @@ from meeting_service import join_meet_automated_and_record
 from search_service import (
     SimpleFormatter, open_dir, exists_in, INDEX_DIR
 )
-
+from calendar_service import (_event_key, _is_done, timedelta, sync_all_deadlines )
 # --- Create the Blueprint ---
 bp = Blueprint('api', __name__)
+
+# --- [NEW] Helper Function for Routes ---
+# This is used by multiple endpoints to find the correct data folder
+def find_course_folder(course_id):
+    """Helper to find the course folder based on ID."""
+    # Use glob to find the folder matching the ID prefix
+    # Relies on SAVE_DIR being an absolute path from config.py
+    pattern = os.path.join(SAVE_DIR, f"{course_id}_*")
+    print(f"   [API Debug] find_course_folder searching for pattern: {pattern}")
+    try:
+        matches = glob.glob(pattern)
+        if matches and os.path.isdir(matches[0]):
+            print(f"   [API Debug] find_course_folder found: {matches[0]}")
+            return matches[0] # Return the first match
+    except Exception as e:
+        print(f"   [API Debug] Error in find_course_folder: {e}")
+    print("   [API Debug] find_course_folder found nothing.")
+    return None
+# ----------------------------------------
 
 # --- [NEW] Helper Function for Routes ---
 # This is used by multiple endpoints to find the correct data folder
@@ -764,3 +787,317 @@ def schedule_meet_endpoint():
     except Exception as e:
         print(f"API: Error scheduling automated Google Meet: {e}"); traceback.print_exc()
         return jsonify({"error": f"Failed to schedule automated Meet task: {e}"}), 500
+
+# --- Google Calendar Routes ---
+
+@bp.route('/api/sync_calendar', methods=['POST'])
+@token_required # <-- 1. Add decorator
+def manual_calendar_sync():
+    """Triggers a Google Calendar sync for the logged-in user."""
+    
+    # 2. Get user_id from the token
+    user_id = g.current_user['id'] 
+    
+    print(f"API: Manual calendar sync triggered for user {user_id}")
+    
+    # 3. Pass user_id to the background thread
+    threading.Thread(target=sync_all_deadlines, args=(user_id,), daemon=True).start()
+    
+    return jsonify({"status": "Syncing to Google Calendar... Check in 1 min!"}), 202
+
+@bp.route('/api/user/settings', methods=['GET'])
+@token_required # <-- 1. Secure the endpoint
+def get_user_settings():
+    """
+    Fetches settings for the logged-in user, like their Google Calendar ID.
+    """
+    
+    # 2. Get the logged-in user's ID
+    user_id = g.current_user['id']
+    
+    try:
+        db = get_db()
+        # 3. Get the user's settings from the database
+        user_settings = db.execute(
+            "SELECT google_calendar_id FROM user WHERE id = ?",
+            (user_id,)
+        ).fetchone()
+
+        if not user_settings:
+            return jsonify({"error": "User not found."}), 404
+        
+        return jsonify(dict(user_settings)), 200
+
+    except Exception as e:
+        print(f"API Error: /api/user/settings: {e}"); traceback.print_exc()
+        return jsonify({"error": str(e)}), 500    
+
+@bp.route('/api/user/settings', methods=['POST'])
+@token_required # <-- 1. Secure the endpoint
+def update_user_settings():
+    """
+    Updates settings for the logged-in user, like their Google Calendar ID.
+    """
+    
+    # 2. Get the logged-in user's ID
+    user_id = g.current_user['id']
+    
+    data = request.json
+    new_calendar_id = data.get('google_calendar_id')
+
+    if not new_calendar_id:
+        return jsonify({"error": "No 'google_calendar_id' provided."}), 400
+
+    print(f"API: Updating calendar ID for user {user_id} to '{new_calendar_id}'")
+
+    try:
+        db = get_db()
+        # 3. Update the user's row in the database
+        db.execute(
+            "UPDATE user SET google_calendar_id = ? WHERE id = ?",
+            (new_calendar_id, user_id)
+        )
+        db.commit()
+        
+        return jsonify({"status": "Settings updated successfully."}), 200
+
+    except Exception as e:
+        db.rollback()
+        print(f"API Error: /api/user/settings: {e}"); traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@bp.route('/api/calendar/events')
+@token_required # <-- 1. Add decorator
+def get_calendar_events():
+    
+    # 2. Get user_id from the token
+    user_id = g.current_user['id']
+    
+    events = []
+    tz = pytz.timezone(GOOGLE_CALENDAR_TIMEZONE) # Assuming this is in config
+    now = datetime.now(tz)
+
+    db = get_db()
+    
+    # 3. Get the user's personal calendar ID
+    user = db.execute("SELECT google_calendar_id FROM user WHERE id = ?", (user_id,)).fetchone()
+    user_calendar_id = user['google_calendar_id'] if user else 'primary'
+
+    # 4. [MODIFIED SQL] Fetch deadlines *only* for this user
+    #    Also, join using the correct local DB IDs
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT c.name AS course_name, c.lms_course_id, d.*
+        FROM deadlines d
+        JOIN courses c ON d.course_db_id = c.id
+        WHERE d.user_id = ? AND d.parsed_iso_date IS NOT NULL
+    """, (user_id,))
+
+    rows = cursor.fetchall()
+
+    for row in rows:
+        # 5. [MODIFIED PATH] Build the correct user-specific path
+        lms_course_id = row['lms_course_id']
+        safe_course_name = re.sub(r'[\\/*?:"<>|]', "_", row['course_name']).strip()[:150]
+        course_folder = os.path.join(SAVE_DIR, f"user_{user_id}", f"{lms_course_id}_{safe_course_name}")
+        # --- [END MODIFIED PATH] ---
+        
+        meta_path = os.path.join(course_folder, "calendar_meta.json")
+        meta = {}
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            except:
+                pass
+
+        # 6. [MODIFIED] Use the correct local ID for the "done" check
+        if _is_done(row): # Use deadline.id
+            continue
+
+        iso = row['parsed_iso_date']
+        try:
+            due = datetime.fromisoformat(iso.replace('Z', '+00:00')).astimezone(tz)
+        except:
+            continue
+
+        if due < now - timedelta(days=30):
+            continue
+
+        # ... (Your status/color logic is fine) ...
+        status, color = "Pending", "#ff9800" # Simplified
+        if row['is_completed']:
+             status, color = "Submitted", "#4caf50"
+        elif due < now:
+             status, color = "Overdue", "#ff4444"
+
+        # 7. [MODIFIED] Use the user's specific calendar ID
+        google_link = ""
+        ev_key = _event_key(course_folder, {
+            "url": row['url'],
+            "time_string": row['time_string']
+        })
+        google_event_id = meta.get(ev_key)
+        if google_event_id and user_calendar_id:
+            raw = f"{google_event_id} {user_calendar_id}" # Use user's calendar
+            encoded = base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8").rstrip("=")
+            google_link = f"https://calendar.google.com/calendar/event?eid={encoded}"
+
+        title = row['time_string'].split(":", 1)[0].strip() if row['time_string'] else "Deadline"
+
+        events.append({
+            "course": row['course_name'],
+            "title": title,
+            "status": status,
+            "status_color": color,
+            "lms_link": row['url'],
+            "google_link": google_link,
+            "due_iso": iso,
+            "due_formatted": due.strftime("%d/%m %H:%M"),
+            "is_overdue": (due < now and not row['is_completed'])
+        })
+
+    events.sort(key=lambda x: (not x["is_overdue"], x["due_iso"]))
+    return jsonify(events)
+
+
+from study_planner import generate_study_plan
+
+
+@bp.route('/api/generate_study_plan', methods=['POST'])
+@token_required # <-- 1. Secure the endpoint
+def trigger_plan():
+    """Triggers an AI-powered study plan generation for the logged-in user."""
+    
+    # 2. Get the user ID from the token
+    user_id = g.current_user['id']
+    
+    print(f"API: AI Study Plan triggered for user {user_id}")
+    
+    # 3. Pass the user_id to the background task
+    threading.Thread(target=generate_study_plan, args=(user_id,), daemon=True).start()
+    return jsonify({"status": "AI Study Plan Started!", "waifu": "I'm on it, Senpai!"}), 202
+
+@bp.route('/api/study_plan/events', methods=['GET'])
+@token_required # <-- 1. Secure the endpoint
+def get_study_plan_events():
+    """Gets all upcoming [STUDY] events from the user's personal Google Calendar."""
+    
+    # 2. Get the logged-in user's ID
+    user_id = g.current_user['id']
+    
+    try:
+        db = get_db()
+        # 3. Get this user's specific calendar ID from the database
+        user = db.execute("SELECT google_calendar_id FROM user WHERE id = ?", (user_id,)).fetchone()
+        user_calendar_id = user['google_calendar_id'] if user else 'primary'
+        
+        print(f"API: Fetching study events for user {user_id} from calendar: {user_calendar_id}")
+
+        creds = service_account.Credentials.from_service_account_file(
+            GOOGLE_SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/calendar']
+        )
+        service = build('calendar', 'v3', credentials=creds)
+        tz = pytz.timezone(GOOGLE_CALENDAR_TIMEZONE)
+        now = datetime.now(tz)
+        time_min = now.isoformat()
+        time_max = (now + timedelta(days=14)).isoformat()
+
+        # 4. Fetch events from the user's specific calendar
+        events_result = service.events().list(
+            calendarId=user_calendar_id, # <-- Use the user's calendar
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime',
+            q="[STUDY]"
+        ).execute()
+
+        events = events_result.get('items', [])
+        study_events = []
+
+        # 5. Parse the events (this logic is fine)
+        for event in events:
+            summary = event.get('summary', '')
+            if '[STUDY]' not in summary:
+                continue
+
+            course_full = summary.replace('[STUDY]', '').strip()
+            start_str = event['start'].get('dateTime')
+            end_str = event['end'].get('dateTime')
+            if not start_str or not end_str:
+                continue
+
+            try:
+                start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00')).astimezone(tz)
+                end_dt = datetime.fromisoformat(end_str.replace('Z', '+00:00')).astimezone(tz)
+            except:
+                continue
+
+            desc = event.get('description', '') or ""
+            
+            # --- (All your description-parsing logic is great and unchanged) ---
+            difficulty = 3
+            due_date = ""
+            ai_reason = "AI-planned"
+            lms_link = ""
+            breakdown = []
+
+            diff_match = re.search(r'Difficulty: ([\⭐\☆]+) \((\d)/5\)', desc)
+            if diff_match:
+                difficulty = int(diff_match.group(2))
+
+            due_match = re.search(r'Due: ([^\n]+)', desc)
+            if due_match:
+                due_date = due_match.group(1).strip()
+
+            if "AI Reason:" in desc:
+                try:
+                    reason_text = desc.split("AI Reason:")[1].split("📝 Breakdown:")[0].strip()
+                    ai_reason = " ".join(reason_text.split())
+                except: pass
+
+            if "Breakdown:" in desc:
+                try:
+                    breakdown_part = desc.split("Breakdown:")[1].split("🔗 Resource:")[0]
+                    breakdown = [
+                        line.strip("• ").strip()
+                        for line in breakdown_part.split("\n")
+                        if line.strip().startswith("•")
+                    ][:5]
+                except: pass
+                
+            link_match = re.search(r'Resource: (https?://[^\s\n]+)', desc)
+            if link_match:
+                lms_link = link_match.group(1)
+
+            event_id = event['id']
+            raw = f"{event_id} {user_calendar_id}" # Use user's calendar
+            encoded = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+            google_link = f"https://calendar.google.com/calendar/event?eid={encoded}"
+            duration = (end_dt - start_dt).total_seconds() / 3600
+            
+            study_events.append({
+                "id": event['id'], "course": course_full, "assignment": "Study Block",
+                "difficulty": difficulty, "difficulty_stars": "★" * difficulty + "☆" * (5 - difficulty),
+                "start_time": start_dt.strftime("%d/%m %H:%M"), "end_time": end_dt.strftime("%H:%M"),
+                "duration_hours": duration, "date": start_dt.strftime("%A, %b %d"),
+                "lms_link": lms_link, "google_link": google_link, "due_date": due_date,
+                "color": "#e91e63" if difficulty >= 4 else "#ff9800" if difficulty >= 3 else "#4caf50",
+                "ai_reason": ai_reason, "breakdown": breakdown
+            })
+
+        study_events.sort(key=lambda x: start_dt)
+
+        return jsonify({
+            "total_sessions": len(study_events),
+            "next_7_days": len([e for e in study_events if (now + timedelta(days=7)) >= datetime.strptime(e['start_time'], "%d/%m %H:%M").replace(year=now.year, tzinfo=tz)]),
+            "waifu_message": "Senpai! Your plan is perfect!",
+            "events": study_events
+        })
+
+    except Exception as e:
+        return jsonify({
+            "error": "Failed to fetch study plan",
+            "details": str(e),
+        }), 500
