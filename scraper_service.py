@@ -605,6 +605,9 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
         db.row_factory = sqlite3.Row
         cursor = db.cursor()
         print("   [DB] Scrape thread connected.")
+
+        print(f"   [DB] Clearing old assignments for user_id {user_id}...")
+        cursor.execute("DELETE FROM assignments WHERE user_id = ?", (user_id,))
         # -----------------------------------------------------
 
         # --- 2. Setup Selenium ---
@@ -785,6 +788,11 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
 
             deadlines_to_add = [] # List to hold deadlines for this course
 
+            assignments_to_add = [] # List to hold assignments for this course
+
+            # --- [STATE] Initialize tracking sets ---
+            all_found_deadline_urls = set()
+
             # --- 9. Visit Subpages Loop ---
             for idx, (href, link_text) in enumerate(links_to_visit[:total_to_visit], start=1):
                 print(f"\n         👉 [{idx}/{total_to_visit}] Visiting: {href}")
@@ -923,23 +931,31 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
                     except Exception as sub_e:
                         print(f"            ⚠️ Error finding/processing nested links: {sub_e}")
 
-                    # --- Check Deadlines ---
+                    # --- Check Deadlines and Save Assignments ---
                     if "mod/assign/" in href or "mod/quiz/" in href:
+                        
+                        # --- [THIS PART IS FOR DEADLINES] ---
                         deadline_info = get_deadline_info(current_page_source)
                         if deadline_info:
                             all_found_deadline_urls.add(href) 
                             original_time_str = deadline_info.get("time")
                             iso_timestamp = None
                             
+                            # Clean the string and parse date (this is your fix from before)
                             if original_time_str and deadline_info.get("status") == "Due":
-                                try: iso_timestamp = date_parser.parse(original_time_str, fuzzy=True).isoformat()
-                                except Exception as parse_e: print(f"               ⚠️ Could not parse deadline: {parse_e}")
+                                try:
+                                    clean_time_str = original_time_str.strip()
+                                    parsed_datetime = date_parser.parse(clean_time_str, dayfirst=True)
+                                    iso_timestamp = parsed_datetime.isoformat()
+                                except Exception as parse_e:
+                                    print(f"               ⚠️ Could not parse deadline string '{original_time_str}': {parse_e}")
                             elif original_time_str and deadline_info.get("status") == "Time Remaining":
                                 time_delta = parse_time_remaining(original_time_str)
-                                if time_delta: iso_timestamp = (datetime.now() + time_delta).isoformat()
-                                else: print(f"               ⚠️ Could not calculate relative time: '{original_time_str}'")
+                                if time_delta:
+                                    iso_timestamp = (datetime.now() + time_delta).isoformat()
+                                else:
+                                    print(f"               ⚠️ Could not calculate relative time: '{original_time_str}'")
 
-                            # [MODIFIED] Add user_id and new course_db_id
                             deadlines_to_add.append((
                                 user_id, 
                                 course_db_id, # The local DB ID
@@ -949,6 +965,38 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
                                 href
                             ))
                             print(f"            🎯 Deadline Found (Method: {deadline_info.get('method', 'N/A')})")
+                        
+                        # --- [THIS IS YOUR NEW ASSIGNMENT LOGIC, MODIFIED] ---
+                        if "mod/assign/" in href: # Only for assignments, not quizzes
+                            try:
+                                # (We assume BeautifulSoup is imported at the top of the file)
+                                soup = BeautifulSoup(current_page_source, 'html.parser')
+
+                                assignment_title = None
+                                h2_tag = soup.find('h2')
+                                if h2_tag:
+                                    assignment_title = h2_tag.get_text(strip=True)
+
+                                if not assignment_title:
+                                    title_tag = soup.find('title')
+                                    if title_tag:
+                                        assignment_title = title_tag.get_text(strip=True)
+
+                                if assignment_title and course_name in assignment_title:
+                                    assignment_title = assignment_title.replace(course_name, '', 1).strip()
+                                    assignment_title = re.sub(r'^[\s:\-]+', '', assignment_title)
+
+                                if not assignment_title or assignment_title == course_name:
+                                    assignment_title = link_text or href # Fallback to link text
+
+                                if assignment_title and href:
+                                    # [FIX] Add user_id and course_db_id
+                                    assignments_to_add.append((user_id, course_db_id, assignment_title, href))
+                                    print(f"            📋 Assignment Found: {assignment_title}")
+                                    
+                            except Exception as title_e:
+                                print(f"            ⚠️ Error extracting assignment title: {title_e}")
+                        # --- [END NEW ASSIGNMENT LOGIC] ---
             # --- End Subpage Loop ---
 
             # --- Save deadlines for this course to DB ---
@@ -958,6 +1006,17 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
                     'INSERT INTO deadlines (user_id, course_db_id, status, time_string, parsed_iso_date, url) VALUES (?, ?, ?, ?, ?, ?)',
                     deadlines_to_add
                 )
+
+           # --- Save assignments for this course to DB ---
+            if assignments_to_add:
+                print(f"      [DB] Inserting {len(assignments_to_add)} assignments for course {lms_course_id}...")
+                # Use executemany for efficiency and correct schema
+                # INSERT OR IGNORE will skip any duplicates based on the 'url' UNIQUE constraint
+                cursor.executemany(
+                    'INSERT OR IGNORE INTO assignments (user_id, course_db_id, title, url) VALUES (?, ?, ?, ?)',
+                    assignments_to_add
+                )
+                    
         # --- End Course Loop ---
 
         # --- 10. Commit all changes ---

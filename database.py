@@ -75,6 +75,16 @@ def init_db(db_conn):
       jti TEXT NOT NULL UNIQUE,  /* 'jti' is the unique ID of a JWT */
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS assignments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER NOT NULL,      /* Links to 'courses.id' */
+      title TEXT NOT NULL,
+      url TEXT NOT NULL UNIQUE,         /* URL is the unique identifier */
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
+    );
     """
     # --- End SQL Schema ---
 

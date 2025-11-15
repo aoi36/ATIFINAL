@@ -34,15 +34,18 @@ from scraper_service import (
 )
 from ai_service import (
     ai_client, analyze_document_with_ai, generate_multiple_choice_ai,
-    generate_hint_with_ai
+    generate_hint_with_ai, generate_flashcards_ai, grade_homework_with_ai
 )
 from meeting_service import join_meet_automated_and_record
 from search_service import (
     SimpleFormatter, open_dir, exists_in, INDEX_DIR
 )
 from calendar_service import (_event_key, _is_done, timedelta, sync_all_deadlines )
+from homework_service import submit_homework_to_lms
+
 # --- Create the Blueprint ---
 bp = Blueprint('api', __name__)
+
 
 # --- [NEW] Helper Function for Routes ---
 # This is used by multiple endpoints to find the correct data folder
@@ -1101,3 +1104,448 @@ def get_study_plan_events():
             "error": "Failed to fetch study plan",
             "details": str(e),
         }), 500
+
+# --- [NEW] Endpoint for AI Grading ---
+@bp.route('/api/homework/grade', methods=['POST'])
+@token_required # <-- 1. Secure the endpoint
+def grade_homework():
+    """
+    Grades a user's submitted homework against a course file.
+    Uses the logged-in user's ID.
+    """
+    
+    # 2. Get user_id from token
+    user_id = g.current_user['id']
+    
+    # --- 3. Get form data (expecting course_db_id) ---
+    if 'course_db_id' not in request.form:
+        return jsonify({"error": "Missing 'course_db_id' in form data."}), 400
+    if 'filename' not in request.form:
+        return jsonify({"error": "Missing 'filename' (the original homework file) in form data."}), 400
+
+    course_db_id = request.form['course_db_id'] # This is the local DB ID (e.g., 1)
+    homework_filename = request.form['filename']
+    user_answer_text = request.form.get('answer_text')
+    user_answer_file = request.files.get('answer_file')
+
+    if not user_answer_text and not user_answer_file:
+        return jsonify({"error": "Missing user answer. Provide either 'answer_text' or 'answer_file'."}), 400
+    if user_answer_text and user_answer_file:
+        return jsonify({"error": "Provide either 'answer_text' or 'answer_file', not both."}), 400
+
+    # --- 4. Find and Read the Original Homework File (Securely) ---
+    try:
+        db = get_db()
+        # Find the course in the DB, verifying this user owns it
+        course = db.execute(
+            "SELECT lms_course_id, name FROM courses WHERE id = ? AND user_id = ?",
+            (course_db_id, user_id)
+        ).fetchone()
+
+        if not course:
+            return jsonify({"error": "Course not found or you do not have permission to access it."}), 404
+
+        # Build the correct, user-specific path
+        lms_course_id = course['lms_course_id']
+        safe_course_name = re.sub(r'[\\/*?:"<>|]', "_", course['name']).strip()[:150]
+        course_folder = os.path.join(SAVE_DIR, f"user_{user_id}", f"{lms_course_id}_{safe_course_name}")
+        
+        homework_filepath = os.path.abspath(os.path.join(course_folder, homework_filename))
+        
+        # Security check
+        if not homework_filepath.startswith(os.path.abspath(course_folder)):
+            return jsonify({"error": "Invalid file path."}), 400
+        if not os.path.exists(homework_filepath):
+            return jsonify({"error": f"Homework file '{homework_filename}' not found."}), 404
+        
+        # Read the original homework file
+        file_ext = os.path.splitext(homework_filename)[1].lower()
+        if file_ext == '.pdf': question_text = read_pdf(homework_filepath)
+        elif file_ext == '.docx': question_text = read_docx(homework_filepath)
+        elif file_ext == '.pptx': question_text = read_pptx(homework_filepath)
+        elif file_ext == '.txt': question_text = read_txt(homework_filepath)
+        else:
+            return jsonify({"error": f"Unsupported file type for homework: {file_ext}"}), 400
+        
+        if not question_text:
+            return jsonify({"error": "Could not extract text from the homework file."}), 500
+            
+    except Exception as e:
+        print(f"API Error: /api/homework/grade (reading homework): {e}"); traceback.print_exc()
+        return jsonify({"error": f"Failed to read homework file: {e}"}), 500
+
+    # --- 5. Get the User's Answer ---
+    answer_content = ""; file_type_for_ai = "user's answer"
+    temp_answer_path = None
+    
+    try:
+        if user_answer_file:
+            file_ext = os.path.splitext(user_answer_file.filename)[1].lower()
+            file_type_for_ai = f"user's {file_ext} file"
+            
+            temp_dir = os.path.join(UPLOAD_FOLDER, 'temp_homework')
+            os.makedirs(temp_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            saved_file_name = f"graded_{user_id}_{timestamp}_{secure_filename(user_answer_file.filename)}"
+            temp_answer_path = os.path.join(temp_dir, saved_file_name)
+
+            user_answer_file.save(temp_answer_path)
+            print(f"API: Saved answer file for grading: {temp_answer_path}")
+
+            if file_ext == '.pdf': answer_content = read_pdf(temp_answer_path)
+            elif file_ext == '.docx': answer_content = read_docx(temp_answer_path)
+            elif file_ext == '.txt': answer_content = read_txt(temp_answer_path)
+            else:
+                return jsonify({"error": f"Unsupported file type for answer: {file_ext}"}), 400
+        else:
+            answer_content = user_answer_text
+    except Exception as e:
+        if temp_answer_path and os.path.exists(temp_answer_path): os.remove(temp_answer_path)
+        print(f"API Error: /api/homework/grade (reading answer): {e}"); traceback.print_exc()
+        return jsonify({"error": f"Failed to read user's answer file: {e}"}), 500
+
+    if not answer_content:
+        if temp_answer_path and os.path.exists(temp_answer_path): os.remove(temp_answer_path)
+        return jsonify({"error": "Could not extract text from user's answer."}), 500
+
+    # --- 6. Call AI Service for Grading ---
+    try:
+        grading_result = grade_homework_with_ai(question_text, answer_content, file_type_for_ai)
+        if not grading_result:
+            return jsonify({"error": "AI service failed to grade the homework."}), 500
+
+        # 7. Save to DB
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(
+            'INSERT INTO user_content (user_id, course_db_id, source_file, type, user_question, content_json) VALUES (?, ?, ?, ?, ?, ?)',
+            (user_id, course_db_id, homework_filename, 'grade', f"Answer: {user_answer_file.filename if user_answer_file else 'text input'}", json.dumps(grading_result))
+        )
+        db.commit()
+        print(f"API: Saved AI grade for {homework_filename} (User {user_id}) to DB.")
+
+        # 8. Add file path to result if an answer *file* was provided
+        if temp_answer_path:
+            grading_result["saved_file_path"] = temp_answer_path
+            grading_result["saved_file_name"] = saved_file_name
+        
+        return jsonify(grading_result)
+        
+    except Exception as e:
+        print(f"API Error: /api/homework/grade (AI call/DB save): {e}"); traceback.print_exc()
+        return jsonify({"error": f"Internal server error: {e}"}), 500
+
+
+# @bp.route('/api/course/<int:course_db_id>/files/<path:filename>/flashcards', methods=['POST'])
+# @token_required # <-- 1. Secure the endpoint
+# def generate_flashcards_endpoint(course_db_id, filename):
+#     """
+#     Generates AI flashcards from a specific, already-scraped file.
+#     Gets user_id from the token.
+#     """
+    
+#     # 2. Get user_id from token
+#     user_id = g.current_user['id']
+    
+#     if not ai_client: return jsonify({"error": "AI client not initialized."}), 503
+
+#     try:
+#         # 3. Find and verify the course file path (same logic as /api/get_file)
+#         db = get_db()
+#         course = db.execute(
+#             "SELECT lms_course_id, name FROM courses WHERE id = ? AND user_id = ?",
+#             (course_db_id, user_id)
+#         ).fetchone()
+
+#         if not course:
+#             return jsonify({"error": "Course not found or you do not have permission."}), 404
+
+#         lms_course_id = course['lms_course_id']
+#         safe_course_name = re.sub(r'[\\/*?:"<>|]', "_", course['name']).strip()[:150]
+#         course_folder = os.path.join(SAVE_DIR, f"user_{user_id}", f"{lms_course_id}_{safe_course_name}")
+        
+#         file_path = os.path.abspath(os.path.join(course_folder, filename))
+        
+#         if not file_path.startswith(os.path.abspath(course_folder)):
+#             return jsonify({"error": "Invalid file path."}), 400
+#         if not os.path.exists(file_path):
+#             return jsonify({"error": f"File '{filename}' not found."}), 404
+            
+#         # 4. Read the file
+#         _, file_ext = os.path.splitext(filename)
+#         file_type = ""; extracted_text = ""
+        
+#         if file_ext.lower() == '.pdf': file_type="PDF"; extracted_text=read_pdf(file_path)
+#         elif file_ext.lower() == '.docx': file_type="Word"; extracted_text=read_docx(file_path)
+#         elif file_ext.lower() == '.pptx': file_type="PowerPoint"; extracted_text=read_pptx(file_path)
+#         elif file_ext.lower() == '.txt': file_type="Text"; extracted_text=read_txt(file_path)
+#         else: 
+#             return jsonify({"error": f"Unsupported file type for flashcards: {file_ext}"}), 400
+
+#         if not extracted_text: return jsonify({"error": f"Failed to extract text from '{filename}'."}), 500
+#         if len(extracted_text) > MAX_TEXT_LENGTH_FOR_SUMMARY:
+#             extracted_text = extracted_text[:MAX_TEXT_LENGTH_FOR_SUMMARY]
+
+#         # 5. Generate flashcards using AI
+#         flashcards_data = generate_flashcards_ai(extracted_text, file_type)
+
+#         if flashcards_data:
+#             flashcards_data["source_file"] = filename
+            
+#             # 6. Save to database
+#             try:
+#                 cursor = db.cursor()
+#                 cursor.execute(
+#                     'INSERT INTO user_content (user_id, course_db_id, source_file, type, content_json) VALUES (?, ?, ?, ?, ?)',
+#                     (user_id, course_db_id, filename, 'flashcards', json.dumps(flashcards_data))
+#                 )
+#                 db.commit()
+#                 print(f"API: Saved flashcards for {filename} (User {user_id}) to DB.")
+#                 flashcards_data["saved_to_db"] = True
+#             except Exception as save_e:
+#                 print(f"API: ⚠️ Failed to save flashcards to DB: {save_e}"); db.rollback()
+            
+#             return jsonify(flashcards_data), 200
+#         else:
+#             return jsonify({"error": "AI flashcard generation failed."}), 500
+
+#     except Exception as e:
+#         print(f"API: Error generating flashcards: {e}"); traceback.print_exc()
+#         return jsonify({"error": f"Internal server error: {e}"}), 500
+
+@bp.route('/api/generate_flashcards', methods=['POST'])
+@token_required
+def generate_flashcards_endpoint_from_upload():
+    """
+    Accepts a 'file' upload, 'course_db_id', and 'user_id' (from token).
+    Generates flashcards and saves them to the user_content table.
+    """
+    if not ai_client: return jsonify({"error": "AI client not initialized."}), 503
+    
+    user_id = g.current_user['id']
+    if 'file' not in request.files: return jsonify({"error": "No 'file' part."}), 400
+    if 'course_db_id' not in request.form: return jsonify({"error": "No 'course_db_id' field."}), 400
+
+    file = request.files['file']
+    course_db_id = request.form.get('course_db_id')
+
+    if file.filename == '': return jsonify({"error": "No file selected."}), 400
+
+    filename = secure_filename(file.filename); _, file_ext = os.path.splitext(filename)
+    if not filename or file_ext.lower() not in ALLOWED_EXTENSIONS:
+        return jsonify({"error": f"File type not allowed. Allowed: {list(ALLOWED_EXTENSIONS)}"}), 400
+    
+    temp_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+    upload_path = os.path.join(UPLOAD_FOLDER, temp_filename)
+    local_path = None; extracted_text = ""; file_type = "File"
+
+    try:
+        file.save(upload_path); local_path = upload_path
+        print(f"API: Temp saved upload to {upload_path} for flashcards.")
+        
+        if file_ext.lower() == '.pdf': file_type="PDF"; extracted_text=read_pdf(upload_path)
+        elif file_ext.lower() == '.docx': file_type="Word"; extracted_text=read_docx(upload_path)
+        elif file_ext.lower() == '.pptx': file_type="PowerPoint"; extracted_text=read_pptx(upload_path)
+        elif file_ext.lower() == '.txt': file_type="Text"; extracted_text=read_txt(upload_path)
+
+        if not extracted_text: return jsonify({"error": f"Failed to extract text from '{filename}'."}), 500
+        if len(extracted_text) > MAX_TEXT_LENGTH_FOR_SUMMARY:
+            extracted_text = extracted_text[:MAX_TEXT_LENGTH_FOR_SUMMARY]
+
+        flashcards_data = generate_flashcards_ai(extracted_text, file_type)
+        
+        if flashcards_data:
+            flashcards_data["source_file"] = filename
+            try:
+                db = get_db(); cursor = db.cursor()
+                cursor.execute(
+                    'INSERT INTO user_content (user_id, course_db_id, source_file, type, content_json) VALUES (?, ?, ?, ?, ?)',
+                    (user_id, course_db_id, filename, 'flashcards', json.dumps(flashcards_data))
+                )
+                db.commit()
+                print(f"API: Saved flashcards for {filename} (User {user_id}) to DB.")
+                flashcards_data["saved_to_db"] = True
+            except Exception as save_e:
+                print(f"API: ⚠️ Failed to save flashcards to DB: {save_e}"); db.rollback()
+            
+            return jsonify(flashcards_data), 200
+        else:
+            return jsonify({"error": "AI analysis failed."}), 500
+    except Exception as e:
+        print(f"API: Error generating flashcards: {e}"); traceback.print_exc()
+        return jsonify({"error": f"Internal server error: {e}"}), 500
+    finally:
+        if local_path and os.path.exists(local_path):
+            try: os.remove(local_path); print(f"API: Cleaned up temp file {local_path}")
+            except Exception as del_e: print(f"API: ⚠️ Failed to delete temp file: {del_e}")
+
+@bp.route('/api/homework/submit', methods=['POST'])
+@token_required 
+def submit_homework_endpoint():
+    """
+    Automates homework submission to LMS for the logged-in user.
+    Expects a 'file' upload, 'deadline_id', and 'lms_password'.
+    """
+    
+    # --- [THE FIX] ---
+    # Initialize temp_filepath to None at the start.
+    # This prevents a NameError if an error occurs before it's assigned.
+    temp_filepath = None 
+    # --- [END FIX] ---
+
+    user_id = g.current_user['id']
+    
+    try:
+        # Get form data
+        if 'file' not in request.files: return jsonify({"error": "No file uploaded"}), 400
+        if 'deadline_id' not in request.form: return jsonify({"error": "deadline_id is required"}), 400
+        if 'lms_username' not in request.form: return jsonify({"error": "lms_username is required"}), 400
+        if 'lms_password' not in request.form: return jsonify({"error": "lms_password is required"}), 400
+        
+        file = request.files['file']
+        deadline_id = request.form.get('deadline_id')
+        lms_user = request.form.get('lms_username') # <-- Get username from form
+        lms_pass = request.form.get('lms_password') # <-- Get password from form
+        
+        if file.filename == '': return jsonify({"error": "No file selected"}), 400
+        
+        db = get_db()
+        
+        # Get user's LMS username (the password was sent in the form)
+
+        # Get assignment URL from DB (and verify ownership)
+        deadline = db.execute(
+            "SELECT url FROM deadlines WHERE id = ? AND user_id = ?",
+            (deadline_id, user_id)
+        ).fetchone()
+        
+        if not deadline:
+            return jsonify({"error": "Deadline not found or you do not have permission."}), 404
+        
+        assignment_url = deadline['url']
+
+        # Save file temporarily
+        filename = secure_filename(file.filename)
+        temp_dir = os.path.join(UPLOAD_FOLDER, 'temp_homework')
+        os.makedirs(temp_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_filename = f"{user_id}_{timestamp}_{filename}"
+        temp_filepath = os.path.join(temp_dir, temp_filename) # <-- Variable is assigned here
+        
+        print(f"API: Saving uploaded file to: {temp_filepath}")
+        file.save(temp_filepath)
+
+        # Call homework submission service in a background thread
+        print(f"API: Starting homework submission for user {user_id}...")
+        submission_thread = threading.Thread(
+            target=submit_homework_to_lms,
+            args=(
+                assignment_url,
+                temp_filepath, # Pass the path to the thread
+                lms_user,
+                lms_pass
+            ),
+            daemon=True
+        )
+        submission_thread.start()
+
+        return jsonify({"status": "Homework submission process started."}), 202
+
+    except Exception as e:
+        print(f"API: Error in homework submission endpoint: {e}")
+        traceback.print_exc()
+        
+        # --- [THE FIX] ---
+        # If an error happens, we must clean up the temp file *here*
+        # because the thread was never started.
+        if temp_filepath and os.path.exists(temp_filepath):
+             try:
+                 os.remove(temp_filepath)
+                 print(f"API: [Error Cleanup] Cleaned up temp file: {temp_filepath}")
+             except Exception as cleanup_err:
+                 print(f"API: ⚠️ [Error Cleanup] Could not delete temp file: {cleanup_err}")
+        # --- [END FIX] ---
+
+        return jsonify({
+            "success": False,
+            "error": f"Internal server error: {e}"
+        }), 500
+    
+    # NOTE: There is no 'finally' block.
+    # The 'submit_homework_to_lms' thread is now responsible
+    # for deleting the temp file *after* it's done.
+
+
+@bp.route('/api/assignments', methods=['GET'])
+@token_required
+def get_assignments():
+    user_id = g.current_user['id']
+    db = get_db()
+    rows = db.execute(
+        "SELECT c.name as course_name, d.* FROM deadlines d " +
+        "JOIN courses c ON d.course_db_id = c.id " +
+        "WHERE d.user_id = ?", (user_id,)
+    ).fetchall()
+    assignments = [dict(row) for row in rows]
+    return jsonify(assignments)
+@bp.route('/api/assignments/all', methods=['GET'])
+@token_required # <-- 1. Secure the endpoint
+def get_all_assignments_for_user():
+    """
+    Fetches all assignments (from the 'deadlines' table) for the
+    logged-in user to populate the homework submission dropdown.
+    """
+    
+    # 2. Get user_id from token
+    user_id = g.current_user['id']
+    
+    try:
+        db = get_db()
+        # 3. Join with courses to get the course name
+        assignments_rows = db.execute('''
+            SELECT d.id, d.url, d.time_string, c.name as course_name
+            FROM deadlines d
+            JOIN courses c ON d.course_db_id = c.id
+            WHERE d.user_id = ?
+            ORDER BY c.name, d.parsed_iso_date ASC
+        ''', (user_id,)).fetchall()
+        
+        assignments = [dict(row) for row in assignments_rows]
+        return jsonify(assignments)
+        
+    except Exception as e:
+        print(f"API Error: /api/assignments/all: {e}"); traceback.print_exc()
+        return jsonify({"error": f"Failed to read assignments from database: {e}"}), 500
+
+@bp.route('/api/homework/get_temp_file/<path:filename>', methods=['GET'])
+@token_required # <-- 1. Secure the endpoint
+def get_temp_homework_file(filename):
+    """Securely retrieves a temporary file from the 'temp_homework' folder."""
+    
+    # 2. Get user_id from token
+    user_id = g.current_user['id']
+    
+    try:
+        # 3. Security Check:
+        safe_filename = secure_filename(filename)
+        
+        # --- [THIS BLOCK IS NOW CORRECTLY INDENTED] ---
+        if not safe_filename.startswith(f"graded_{user_id}_"):
+            print(f"API: [SECURITY] User {user_id} tried to access file '{safe_filename}'")
+            return jsonify({"error": "Permission denied."}), 403
+        # --- [END FIX] ---
+
+        temp_dir = os.path.join(UPLOAD_FOLDER, 'temp_homework')
+        file_path = os.path.abspath(os.path.join(temp_dir, safe_filename))
+
+        if not file_path.startswith(os.path.abspath(temp_dir)):
+             return jsonify({"error": "Invalid file path."}), 400
+        if not os.path.exists(file_path):
+            return jsonify({"error": "File not found."}), 404
+
+        # 4. Send the file
+        return send_from_directory(temp_dir, safe_filename, as_attachment=True)
+
+    except Exception as e:
+        print(f"API Error: /api/homework/get_temp_file: {e}"); traceback.print_exc()
+        return jsonify({"error": f"Failed to retrieve file: {e}"}), 500        
