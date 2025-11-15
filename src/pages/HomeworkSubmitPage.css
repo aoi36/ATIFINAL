@@ -1,0 +1,379 @@
+.homework-submit-page {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.page-title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 2rem;
+  color: var(--text-primary);
+}
+
+.description {
+  color: var(--text-secondary);
+  margin-bottom: 2rem;
+  line-height: 1.6;
+}
+
+/* Backend Status Indicators */
+.status-card {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.status-checking {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-online {
+  background-color: rgba(16, 185, 129, 0.1);
+  border-left: 3px solid var(--success);
+}
+
+.status-online .status-message {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.status-offline {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-left: 3px solid var(--warning);
+}
+
+.status-offline .status-message {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.status-help {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: normal;
+  color: var(--text-secondary);
+}
+
+.status-help code {
+  background-color: var(--background);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.offline-warning {
+  color: var(--warning);
+  background-color: rgba(245, 158, 11, 0.1);
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border-left: 3px solid var(--warning);
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+/* Form Styling - Matching Dark Theme */
+.homework-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group label {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+}
+
+.form-group label .required {
+  color: var(--error);
+  margin-left: 0.25rem;
+}
+
+.form-group input[type="url"],
+.form-group input[type="text"],
+.form-group input[type="password"] {
+  padding: 0.75rem;
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+}
+
+.form-group input[type="url"]:focus,
+.form-group input[type="text"]:focus,
+.form-group input[type="password"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.form-group input[type="url"]:disabled,
+.form-group input[type="text"]:disabled,
+.form-group input[type="password"]:disabled {
+  background-color: var(--surface);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* NOTE: Standard file input styling removed in favor of custom styling below */
+
+.help-text {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: -0.25rem;
+}
+
+.security-note {
+  color: var(--success);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.file-selected {
+  color: var(--success);
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+  background-color: rgba(16, 185, 129, 0.1);
+  border-radius: 0.5rem;
+  border-left: 3px solid var(--success);
+}
+
+/* Button Styling */
+.btn {
+  padding: 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Success/Error Messages */
+.success-message {
+  padding: 1rem;
+  background-color: rgba(16, 185, 129, 0.1);
+  border: 1px solid var(--success);
+  border-radius: 0.5rem;
+  color: var(--success);
+  border-left: 3px solid var(--success);
+}
+
+.success-message strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+/* Loading Container */
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.loading-text {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.loading-subtext {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 500px;
+}
+
+/* Info Card */
+.info-card {
+  margin-top: 2rem;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+
+.info-card h3 {
+  color: var(--text-primary);
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+}
+
+.info-card h3:first-child {
+  margin-top: 0;
+}
+
+.info-card ol,
+.info-card ul {
+  color: var(--text-secondary);
+  line-height: 1.8;
+  padding-left: 1.5rem;
+}
+
+.info-card li {
+  margin-bottom: 0.5rem;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .homework-submit-page {
+    padding: 1rem;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
+  }
+
+  .form-group input[type="url"],
+  .form-group input[type="text"],
+  .form-group input[type="password"] {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+}
+
+/* Assignment Dropdown Styling */
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.form-group select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.form-group select:disabled {
+  background-color: var(--surface);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-group select option {
+  padding: 0.5rem;
+}
+
+/* Prefilled File Info */
+.prefilled-file-info {
+  padding: 0.75rem;
+  background-color: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 0.5rem;
+  color: var(--primary);
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prefilled-file-info strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.security-note {
+  color: var(--success) !important;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* NEW STYLES: Custom File Input
+   Copied from AIToolsPage.css for consistency
+*/
+
+.file-input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.file-input {
+  display: none; /* Hides the browser default input */
+}
+
+.file-label {
+  display: block;
+  padding: 1.5rem 1rem;
+  background-color: var(--background);
+  border: 2px dashed var(--border);
+  border-radius: 0.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--text-secondary);
+  font-weight: 500;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.file-label:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background-color: rgba(99, 102, 241, 0.05);
+}
+
+/* Active state when file is selected */
+.file-input:checked + .file-label,
+.file-label.has-file {
+  border-color: var(--primary);
+  background-color: rgba(99, 102, 241, 0.1);
+  color: var(--primary);
+}
+
+.file-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0 0;
+  text-align: center;
+}

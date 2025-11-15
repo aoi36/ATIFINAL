@@ -16,6 +16,7 @@ function Navigation({ currentPage, setCurrentPage, onLogout }) {
     { id: 'scraper', label: 'Scraper' },
     { id: 'calendar', label: 'Calendar' },
     { id: 'study-plan', label: 'Study Plan' },
+    { id: "homework-submit", label: "Submit Homework", icon: "📝" },
 
 
   ];

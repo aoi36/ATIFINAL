@@ -18,3 +18,61 @@
   font-weight: bold;
   color: #28a745; /* Green */
 }
+
+/* File list styles */
+.file-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-info {
+  flex: 1;
+}
+
+.file-info a {
+  color: #007bff;
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.file-info a:hover {
+  text-decoration: underline;
+}
+
+.flashcard-button {
+  margin-left: 12px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.flashcard-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.flashcard-button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  transform: none;
+}

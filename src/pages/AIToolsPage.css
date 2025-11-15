@@ -211,3 +211,21 @@
     gap: 1rem;
   }
 }
+
+/* Auto-submit section styling */
+.auto-submit-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.auto-submit-section .submit-button {
+  background: var(--success, #28a745);
+  width: 100%;
+}
+
+.auto-submit-section .submit-button:hover {
+  background: var(--success-hover, #218838);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+}

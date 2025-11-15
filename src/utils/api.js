@@ -24,36 +24,53 @@ export async function apiCall(endpoint, options = {}) {
     };
 
     if (body && method !== "GET") {
+      // apiCall will handle stringifying, or not, based on isFormData
       config.body = isFormData ? body : JSON.stringify(body);
     }
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
+    // Check if response is JSON before trying to parse
+    const contentType = response.headers.get("content-type");
+    const isJson = contentType && contentType.includes("application/json");
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      
-      // 3. If token is bad (401), log the user out automatically
-      if (response.status === 401 && 
-          endpoint !== '/api/login' && 
-          endpoint !== '/api/register'
-      ) {
-          handleLogout(); // Call the logout helper
+      if (isJson) {
+        const errorData = await response.json().catch(() => ({}));
+        
+        // [FIX] Only auto-logout if 401 and NOT on the login page
+        if (response.status === 401 && 
+            endpoint !== '/api/login' && 
+            endpoint !== '/api/register'
+        ) {
+            handleLogout(); // Call the logout helper
+        }
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      } else {
+        const text = await response.text();
+        console.error("Server returned non-JSON error:", text.substring(0, 200));
+        throw new Error(`Server error: ${response.status}. Backend may not be running.`);
       }
-      
-      throw new Error(errorData.error || `HTTP ${response.status}`);
     }
 
     if (response.status === 204) { // No Content
       return null;
     }
 
-    return await response.json();
+    if (isJson) {
+      return await response.json();
+    } else {
+      return { message: "Success", data: await response.text() };
+    }
   } catch (error) {
     console.error(`[API Call Failed] ${method} ${endpoint}:`, error);
     throw error;
   }
 }
 
+/**
+ * Fetches a protected file as a blob and returns a temporary URL.
+ */
 export async function apiFetchFile(endpoint) {
   const token = localStorage.getItem('authToken');
   const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -71,18 +88,12 @@ export async function apiFetchFile(endpoint) {
     throw new Error(errorData.error || `HTTP ${response.status}`);
   }
 
-  // 1. Get the file data as a "blob"
   const blob = await response.blob(); 
-  
-  // 2. Create a temporary, in-memory URL for the blob
   return URL.createObjectURL(blob);
 }
 
-// --- [NEW] Auth Helper Functions ---
+// --- Auth Helper Functions ---
 
-/**
- * Logs the user in and saves their token and user data.
- */
 export const loginUser = async (username, password) => {
   const data = await apiCall('/api/login', {
     method: 'POST',
@@ -96,9 +107,6 @@ export const loginUser = async (username, password) => {
   return data;
 };
 
-/**
- * Registers a new user.
- */
 export const registerUser = async (username, password) => {
   return await apiCall('/api/register', {
     method: 'POST',
@@ -106,12 +114,17 @@ export const registerUser = async (username, password) => {
   });
 };
 
-/**
- * Logs the user out by clearing their data from localStorage.
- */
 export const handleLogout = () => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    // Attempt to tell the backend to blocklist this token
+    apiCall('/api/logout', { method: 'POST' }).catch(err => {
+      console.error("Logout API call failed, but logging out locally anyway.", err);
+    });
+  }
+  
+  // Always clear local data immediately
   localStorage.removeItem('authToken');
   localStorage.removeItem('currentUser');
-  // Force a reload to the login page
-  window.location.href = '/'; 
+  window.location.href = '/'; // Force reload to the login page
 };

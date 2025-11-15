@@ -1,13 +1,15 @@
 // src/pages/AIToolsPage.jsx
 
-import React, { useState, useEffect } from "react" // Ensure React is imported
+import React, { useState, useEffect } from "react"
 import Card from "../components/Card"
 import LoadingSpinner from "../components/LoadingSpinner"
 import ErrorAlert from "../components/ErrorAlert"
 import { apiCall } from "../utils/api"
-import "./AIToolsPage.css" // Make sure this CSS file exists
+import ReactMarkdown from 'react-markdown';
+import "./AIToolsPage.css"
+import QuestionList from "../components/QuestionList" // Make sure this is imported
 
-function AIToolsPage() {
+function AIToolsPage({ setCurrentPage, setHomeworkSubmitParams }) {
   const [activeTab, setActiveTab] = useState("summarize")
   const [file, setFile] = useState(null)
   const [question, setQuestion] = useState("")
@@ -15,9 +17,16 @@ function AIToolsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  // State for homework grader
+  const [answerText, setAnswerText] = useState('');
+  const [answerFile, setAnswerFile] = useState(null);
+  const [courseFiles, setCourseFiles] = useState([]);
+  const [selectedFile, setSelectedFile] = useState('');
+  const [loadingFiles, setLoadingFiles] = useState(false);
+
   // State for courses and selected course ID
   const [courses, setCourses] = useState([])
-  const [selectedCourseId, setSelectedCourseId] = useState("") // This will hold the ID (e.g., 473)
+  const [selectedCourseId, setSelectedCourseId] = useState("")
   const [loadingCourses, setLoadingCourses] = useState(true)
 
   // Fetch courses when the component loads
@@ -27,11 +36,6 @@ function AIToolsPage() {
         setLoadingCourses(true)
         const data = await apiCall("/api/courses")
         setCourses(data || [])
-        
-        // By removing the setSelectedCourseId call here,
-        // the state will remain "" (its initial value from useState)
-        // which will cause the "-- Select a course --" option to be shown.
-        
       } catch (err) {
         setError(err.message || "Failed to load courses list")
       } finally {
@@ -41,7 +45,29 @@ function AIToolsPage() {
     fetchCourses()
   }, [])
 
-  const handleFileChange = (e) => {
+  // Fetch course files when 'Homework' tab is active and a course is selected
+  useEffect(() => {
+    if (activeTab === 'homework' && selectedCourseId) {
+      const fetchFiles = async () => {
+        try {
+          setLoadingFiles(true);
+          setCourseFiles([]);
+          setSelectedFile('');
+          // This call is correct. It uses the local course.id (e.g., 1, 2)
+          const data = await apiCall(`/api/course/${selectedCourseId}/files`);
+          setCourseFiles(data || []);
+        } catch (err) {
+          setError(err.message || 'Failed to load course files.');
+        } finally {
+          setLoadingFiles(false);
+        }
+      };
+      fetchFiles();
+    }
+  }, [activeTab, selectedCourseId]);
+
+
+const handleFileChange = (e) => {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
       const validExtensions = [".txt", ".pdf", ".docx", ".pptx"]
@@ -54,41 +80,66 @@ function AIToolsPage() {
     }
   }
 
+  const handleAnswerFileChange = (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      setAnswerFile(selectedFile);
+      setError(null);
+    }
+
+  };
+
   // Centralized submit handler
   const handleSubmit = async (e) => {
     e.preventDefault()
     
-    if (!file) {
-      setError("Please select a file")
-      return
-    }
     if (!selectedCourseId) {
       setError("Please select a course")
       return
     }
 
     let endpoint = ""
-    if (activeTab === "summarize") endpoint = "/api/summarize_upload"
-    else if (activeTab === "questions") endpoint = "/api/generate_questions"
-    else if (activeTab === "hint") endpoint = "/api/get_hint"
-    else return;
-
-    // --- Build FormData ---
     const formData = new FormData()
-    formData.append("file", file)
-    
-    // --- [CRITICAL LINE 2] ---
-    // This line sends the ID (e.g., 473) from the state
-    formData.append("course_db_id", selectedCourseId) 
-    // -------------------------
+    let sourceFileName = file?.name;
 
-    if (activeTab === "hint") {
-      if (!question.trim()) {
-        setError("Please enter a question")
-        return
-      }
-      formData.append("question", question)
+    if (activeTab === "summarize") {
+        if (!file) { setError("Please select a file"); return; }
+        endpoint = "/api/summarize_upload";
+        formData.append("file", file);
+    } else if (activeTab === "questions") {
+        if (!file) { setError("Please select a file"); return; }
+        endpoint = "/api/generate_questions";
+        formData.append("file", file);
+    } else if (activeTab === "hint") {
+        if (!file) { setError("Please select a file"); return; }
+        if (!question.trim()) { setError("Please enter a question"); return; }
+        endpoint = "/api/get_hint";
+        formData.append("file", file);
+        formData.append("question", question);
+    } else if (activeTab === "homework") {
+        endpoint = "/api/homework/grade";
+        if (!selectedFile) { setError("Please select the homework file"); return; }
+        if (!answerText && !answerFile) { setError("Please provide an answer"); return; }
+        
+        formData.append('filename', selectedFile);
+        sourceFileName = selectedFile;
+        if (answerText) formData.append('answer_text', answerText);
+        if (answerFile) formData.append('answer_file', answerFile);
+    // --- [BUG #3 FIX] ---
+    // Added the 'flashcards' tab logic
+    } else if (activeTab === "flashcards") {
+        if (!file) { setError("Please select a file"); return; }
+        endpoint = "/api/generate_flashcards";
+        formData.append("file", file);
+    // --- [END BUG #3 FIX] ---
+    } else {
+      return;
     }
+
+    // --- [BUG #1 FIX] ---
+    // The backend API expects 'course_db_id', not 'course_id'
+    formData.append("course_db_id", selectedCourseId)
+    // --- [END BUG #1 FIX] ---
 
     // --- Make API Call ---
     try {
@@ -102,14 +153,9 @@ function AIToolsPage() {
         isFormData: true,
       })
 
-      // Handle response structures
-      if (activeTab === "summarize") {
-        setResult({ type: "summary", data: data })
-      } else if (activeTab === "questions") {
-        setResult({ type: "questions", data: data.review_questions || [] })
-      } else if (activeTab === "hint") {
-        setResult({ type: "hint", data: data.hint || "No hint available" })
-      }
+      // This sets the result to the data returned from the API
+      // e.g., { summary: [...], review_questions: [...], score: "8/10", etc. }
+      setResult({ ...data, source_file: sourceFileName });
 
     } catch (err) {
       setError(err.message || "Failed to process file")
@@ -117,6 +163,21 @@ function AIToolsPage() {
     } finally {
       setLoading(false)
     }
+  }
+  
+  // --- [NEW] Helper to clear state when changing tabs ---
+  const changeTab = (tabName) => {
+    setActiveTab(tabName);
+    setResult(null);
+    setError(null);
+    setFile(null);
+    setAnswerFile(null);
+    setQuestion("");
+    // Reset file input fields
+    const fileInput = document.getElementById("file-input");
+    if (fileInput) fileInput.value = "";
+    const answerFileInput = document.getElementById("answer-file-input");
+    if (answerFileInput) answerFileInput.value = "";
   }
 
   return (
@@ -129,21 +190,34 @@ function AIToolsPage() {
         <div className="tabs">
           <button
             className={`tab ${activeTab === "summarize" ? "active" : ""}`}
-            onClick={() => { setActiveTab("summarize"); setResult(null); }}
+            onClick={() => changeTab("summarize")}
           >
             Summarizer
           </button>
           <button
             className={`tab ${activeTab === "questions" ? "active" : ""}`}
-            onClick={() => { setActiveTab("questions"); setResult(null); }}
+            onClick={() => changeTab("questions")}
           >
             Question Generator
           </button>
           <button
             className={`tab ${activeTab === "hint" ? "active" : ""}`}
-            onClick={() => { setActiveTab("hint"); setResult(null); }}
+            onClick={() => changeTab("hint")}
           >
             Homework Hints
+          </button>
+           <button
+            className={`tab ${activeTab === "homework" ? "active" : ""}`}
+            onClick={() => changeTab("homework")}
+          >
+            Homework Grader
+          </button>
+           {/* You were missing this from your posted code, but your collab file implies it */}
+           <button
+            className={`tab ${activeTab === "flashcards" ? "active" : ""}`}
+            onClick={() => changeTab("flashcards")}
+          >
+            Flashcards
           </button>
         </div>
 
@@ -154,52 +228,102 @@ function AIToolsPage() {
                 
                 {/* --- Course Selection Dropdown --- */}
                 <div className="form-group">
-                  <label className="form-label">Select Course</label>
-                  {loadingCourses ? (
-                    <LoadingSpinner />
-                  ) : (
+                  <label className="form-label">1. Select Course</label>
+                  {loadingCourses ? ( <LoadingSpinner /> ) : (
                     <select
                       className="form-input"
-                      value={selectedCourseId} // Binds to the state (which holds the ID)
-                      onChange={(e) => setSelectedCourseId(e.target.value)} // Updates state with the ID
+                      value={selectedCourseId}
+                      onChange={(e) => setSelectedCourseId(e.target.value)}
                       required
                     >
                       <option value="" disabled>-- Select a course --</option>
                       {courses.map((course) => (
-                        // --- [CRITICAL LINE 3] ---
-                        // The `value` attribute MUST be the ID
+                        // --- [BUG #2 FIX] ---
+                        // 'key' and 'value' MUST be 'course.id'
+                        // This was the bug causing you to send the course name
                         <option key={course.id} value={course.id}>
                           {course.name}
                         </option>
-                        // -------------------------
+                        // --- [END BUG #2 FIX] ---
                       ))}
                     </select>
                   )}
-                  <p className="file-hint">Select the course this file belongs to.</p>
                 </div>
 
-                {/* --- File Upload Group --- */}
-                <div className="form-group">
-                  <label className="form-label">Upload Document</label>
-                  <div className="file-input-wrapper">
-                    <input
-                      type="file"
-                      id="file-input"
-                      className="file-input"
-                      onChange={handleFileChange}
-                      accept=".txt,.pdf,.docx,.pptx"
-                    />
-                    <label htmlFor="file-input" className="file-label">
-                      {file ? `📄 ${file.name}` : "📁 Choose File"}
-                    </label>
+                {/* Show file upload for tabs that need it */}
+                {activeTab !== 'homework' && (
+                  <div className="form-group">
+                    <label className="form-label">2. Upload Document</label>
+                    <div className="file-input-wrapper">
+                      <input
+                        type="file"
+                        id="file-input"
+                        className="file-input"
+                        onChange={handleFileChange}
+                        accept=".txt,.pdf,.docx,.pptx"
+                      />
+                      <label htmlFor="file-input" className="file-label">
+                        {file ? `📄 ${file.name}` : "📁 Choose File"}
+                      </label>
+                    </div>
                   </div>
-                  <p className="file-hint">Supported: TXT, PDF, DOCX, PPTX</p>
-                </div>
+                )}
+                
+                {/* Show homework-specific fields */}
+                {activeTab === 'homework' && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">2. Select Homework File</label>
+                      {loadingFiles ? <LoadingSpinner /> : (
+                        <select
+                          className="form-input"
+                          value={selectedFile}
+                          onChange={(e) => setSelectedFile(e.target.value)}
+                          required
+                          disabled={!selectedCourseId}
+                        >
+                          <option value="" disabled>-- Select a file --</option>
+                          {courseFiles.map((fileName) => (
+                            <option key={fileName} value={fileName}>
+                              {decodeURIComponent(fileName)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">3. Your Answer (Text)</label>
+                      <textarea
+                        className="form-input"
+                        value={answerText}
+                        onChange={(e) => setAnswerText(e.target.value)}
+                        placeholder="Type your answer here..."
+                        rows="5"
+                        disabled={!!answerFile}
+                      ></textarea>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Or Upload Your Answer (File)</label>
+                      <div className="file-input-wrapper">
+                        <input
+                          type="file"
+                          id="answer-file-input"
+                          className="file-input"
+                          onChange={handleAnswerFileChange}
+                          disabled={!!answerText}
+                        />
+                        <label htmlFor="answer-file-input" className="file-label">
+                          {answerFile ? `📄 ${answerFile.name}` : "📁 Choose Answer File"}
+                        </label>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* --- Hint Question Textarea --- */}
                 {activeTab === "hint" && (
                   <div className="form-group">
-                    <label className="form-label">Your Question</label>
+                    <label className="form-label">3. Your Question</label>
                     <textarea
                       className="form-input"
                       placeholder="Enter your homework question or what you're stuck on..."
@@ -214,69 +338,89 @@ function AIToolsPage() {
                 <button type="submit" className="submit-button" disabled={loading || loadingCourses}>
                   {loading ? "Processing..." : 
                    activeTab === "summarize" ? "Summarize" :
-                   activeTab === "questions" ? "Generate Questions" : "Get Hint"}
+                   activeTab === "questions" ? "Generate Questions" :
+                   activeTab === "hint" ? "Get Hint" :
+                   activeTab === "homework" ? "Grade Homework" : 
+                   activeTab === "flashcards" ? "Create Flashcards" : "Go"}
                 </button>
               </form>
             </Card>
           </div>
 
           <div className="result-panel">
-            {/* ... (Result display logic) ... */}
             {loading ? (
               <LoadingSpinner />
             ) : result ? (
-              <Card title={
-                  result.type === "summary" ? "Summary" 
-                : result.type === "questions" ? "Review Questions" 
-                : "Hint"
-              }>
+              <Card title={`Result for "${decodeURIComponent(result.source_file)}"`}>
                 <div className="result-content">
                   
-                  {result.type === "summary" && (
+                  {activeTab === "summarize" && result.summary && (
                     <div className="summary-list">
                       <strong>Summary:</strong>
                       <ul>
-                        {result.data.summary?.map((item, idx) => <li key={idx}>{item}</li>) || <li>No summary.</li>}
+                        {result.summary?.map((item, idx) => <li key={idx}>{item}</li>) || <li>No summary.</li>}
                       </ul>
                       <strong>Key Topics:</strong>
                       <ul>
-                        {result.data.key_topics?.map((item, idx) => <li key={idx}>{item}</li>) || <li>No topics.</li>}
+                        {result.key_topics?.map((item, idx) => <li key={idx}>{item}</li>) || <li>No topics.</li>}
                       </ul>
                     </div>
                   )}
 
-                  {result.type === "hint" && (
-                    <p className="result-text">{result.data}</p>
+                  {activeTab === "hint" && result.hint && (
+                    <p className="result-text">{result.hint}</p>
                   )}
                   
-                  {result.type === "questions" && Array.isArray(result.data) ? (
-                    <div className="questions-list">
-                      {result.data.map((q, idx) => (
-                        <div key={idx} className="question-item">
-                          <p className="question-text">
-                            <strong>Q{idx + 1}:</strong> {q.question}
-                          </p>
-                          {q.options && (
-                            <ul className="options-list">
-                              {q.options.map((opt, optIdx) => (
-                                <li 
-                                  key={optIdx} 
-                                  className={opt === q.correct_answer ? 'correct-answer' : ''}
-                                >
-                                  {opt}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          <p className="explanation-text">
-                            <strong>Explanation:</strong> {q.explanation}
-                          </p>
+                  {activeTab === "questions" && result.review_questions && (
+                    <QuestionList questions={result.review_questions} />
+                  )}
+                  
+                  {activeTab === 'homework' && result.score && (
+                    <div className="grading-result">
+                        <div className="result-section">
+                            <h4>Score</h4>
+                            <p>{result.score}</p>
+                        </div>
+                        <div className="result-section">
+                            <h4>Feedback</h4>
+                            <ReactMarkdown>{result.feedback}</ReactMarkdown>
+                        </div>
+                        <div className="result-section">
+                            <h4>Explanation</h4>
+                            <ReactMarkdown>{result.explanation}</ReactMarkdown>
+                        </div>
+                        
+                        {result.saved_file_name && setHomeworkSubmitParams && setCurrentPage && (
+                          <div className="result-section auto-submit-section">
+                            <button
+                              className="submit-button"
+                              onClick={() => {
+                                setHomeworkSubmitParams({
+                                  prefilledFileName: result.saved_file_name
+                                })
+                                setCurrentPage('homework-submit')
+                              }}
+                            >
+                              Auto-Submit to LMS
+                            </button>
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  {/* --- [NEW] Render logic for flashcards --- */}
+                  {activeTab === "flashcards" && result.flashcards && (
+                    <div className="flashcards-list">
+                      {result.flashcards.map((card, idx) => (
+                        <div key={idx} className="flashcard-item">
+                          <div className="flashcard-term"><strong>{card.term}</strong> ({card.category})</div>
+                          <div className="flashcard-def">{card.definition}</div>
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    result.type === "questions" && <p className="no-data">No questions were generated.</p>
                   )}
+                  {/* --- [END NEW] --- */}
+
                 </div>
               </Card>
             ) : (

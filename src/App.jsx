@@ -8,6 +8,8 @@ import AIToolsPage from "./pages/AIToolsPage"
 import MeetSchedulerPage from "./pages/MeetSchedulerPage"
 import ScraperPage from "./pages/ScraperPage"
 import LoginPage from "./pages/LoginPage";
+import FlashcardsPage from "./pages/FlashcardsPage"
+import HomeworkSubmitPage from "./pages/HomeworkSubmitPage"
 import RegisterPage from "./pages/RegisterPage";
 import CalendarPage from "./pages/CalendarPage";
 import { handleLogout } from "./utils/api";
@@ -20,6 +22,9 @@ function App() {
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem("authToken") ? true : false);
   const [authPage, setAuthPage] = useState("login");
+  const [flashcardParams, setFlashcardParams] = useState(null)
+  const [homeworkGraderParams, setHomeworkGraderParams] = useState(null)
+  const [homeworkSubmitParams, setHomeworkSubmitParams] = useState(null)
  if (!isLoggedIn) {
     if (authPage === 'login') {
       return (
@@ -49,15 +54,30 @@ function App() {
         case "calendar":
         return <CalendarPage />
       case "tools":
-        return <AIToolsPage />
+        return <AIToolsPage
+          setCurrentPage={setCurrentPage}
+          setHomeworkSubmitParams={setHomeworkSubmitParams}
+        />
+      case "homework-submit":
+        return <HomeworkSubmitPage
+          prefilledFileName={homeworkSubmitParams?.prefilledFileName}
+        />
+      case "flashcards":
+        if (flashcardParams) {
+          return <FlashcardsPage 
+            params={flashcardParams}
+            setCurrentPage={setCurrentPage}
+          />
+        }
         case "study-plan":
         return <StudyPlanPage />;
       case "course-detail":
         if (selectedCourse) {
           return (
             <CourseDetailPage 
-              course={selectedCourse} 
-              setCurrentPage={setCurrentPage} 
+              course={selectedCourse}
+              setCurrentPage={setCurrentPage}
+              setFlashcardParams={setFlashcardParams}
             />
           )
         }
