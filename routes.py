@@ -42,7 +42,12 @@ from search_service import (
 )
 from calendar_service import (_event_key, _is_done, timedelta, sync_all_deadlines )
 from homework_service import submit_homework_to_lms
-
+from chat_service import (
+    send_chat_message, 
+    get_conversation_history,
+    list_user_conversations,
+    delete_conversation
+)
 # --- Create the Blueprint ---
 bp = Blueprint('api', __name__)
 
@@ -1549,3 +1554,159 @@ def get_temp_homework_file(filename):
     except Exception as e:
         print(f"API Error: /api/homework/get_temp_file: {e}"); traceback.print_exc()
         return jsonify({"error": f"Failed to retrieve file: {e}"}), 500        
+
+@bp.route('/api/chat/message', methods=['POST'])
+@token_required
+def chat_message_endpoint():
+    """
+    Sends a message to the AI chatbot.
+    
+    Request Body:
+    {
+        "message": "Explain binary search trees",
+        "conversation_id": 123,           // Optional - omit to create new
+        "ai_provider": "claude",          // "gemini", "claude", or "chatgpt"
+        "course_id": 5,                   // Optional - for course context
+        "attachments": ["lecture_01.pdf"] // Optional - filenames from course
+    }
+    """
+    user_id = g.current_user['id']
+    
+    data = request.json
+    if not data or 'message' not in data:
+        return jsonify({"error": "Missing 'message' field"}), 400
+    
+    message = data.get('message', '').strip()
+    if not message:
+        return jsonify({"error": "Message cannot be empty"}), 400
+    
+    # Get optional parameters
+    conversation_id = data.get('conversation_id')
+    ai_provider = data.get('ai_provider', 'gemini').lower()
+    course_id = data.get('course_id')
+    attachments = data.get('attachments', [])
+    
+    # Validate AI provider
+    if ai_provider not in ['gemini', 'claude', 'chatgpt', 'github']:
+        return jsonify({"error": "Invalid ai_provider. Must be 'gemini', 'claude', 'chatgpt', or 'github'"}), 400
+    
+    print(f"[API] Chat message from user {user_id} via {ai_provider}")
+    
+    try:
+        result = send_chat_message(
+            user_id=user_id,
+            message=message,
+            conversation_id=conversation_id,
+            ai_provider=ai_provider,
+            course_db_id=course_id,
+            attachments=attachments
+        )
+        
+        if 'error' in result:
+            return jsonify(result), 500
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        print(f"[API] Chat error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/chat/conversations', methods=['GET'])
+@token_required
+def list_conversations_endpoint():
+    """
+    Lists all conversations for the current user.
+    
+    Query Parameters:
+    - limit: Number of conversations to return (default 20)
+    """
+    user_id = g.current_user['id']
+    limit = request.args.get('limit', 20, type=int)
+    
+    try:
+        conversations = list_user_conversations(user_id, limit)
+        return jsonify(conversations), 200
+        
+    except Exception as e:
+        print(f"[API] Error listing conversations: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/chat/conversation/<int:conversation_id>', methods=['GET'])
+@token_required
+def get_conversation_endpoint(conversation_id):
+    """
+    Retrieves full history of a specific conversation.
+    """
+    user_id = g.current_user['id']
+    
+    try:
+        history = get_conversation_history(user_id, conversation_id)
+        
+        if 'error' in history:
+            return jsonify(history), 404
+        
+        return jsonify(history), 200
+        
+    except Exception as e:
+        print(f"[API] Error getting conversation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/chat/conversation/<int:conversation_id>', methods=['DELETE'])
+@token_required
+def delete_conversation_endpoint(conversation_id):
+    """
+    Deletes a conversation and all its messages.
+    """
+    user_id = g.current_user['id']
+    
+    try:
+        success = delete_conversation(user_id, conversation_id)
+        
+        if success:
+            return jsonify({"status": "Conversation deleted successfully"}), 200
+        else:
+            return jsonify({"error": "Conversation not found or unauthorized"}), 404
+        
+    except Exception as e:
+        print(f"[API] Error deleting conversation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/chat/providers', methods=['GET'])
+@token_required
+def get_available_providers():
+    """
+    Returns which AI providers are configured and available.
+    """
+    from chat_service import gemini_client, claude_client, openai_client
+    
+    providers = {
+        "gemini": {
+            "available": gemini_client is not None,
+            "name": "Google Gemini",
+            "model": "gemini-2.0-flash-exp"
+        },
+        "claude": {
+            "available": claude_client is not None,
+            "name": "Anthropic Claude",
+            "model": "claude-sonnet-4-20250514"
+        },
+        "chatgpt": {
+            "available": openai_client is not None,
+            "name": "OpenAI ChatGPT",
+            "model": "gpt-4o"
+        },
+        "github": {
+            "available": github_client is not None,
+            "name": "GitHub Models (GPT-4o)",
+            "model": "gpt-4o",
+            "description": "Free GPT-4o access via GitHub"
+        }
+    }
+    
+    return jsonify(providers), 200

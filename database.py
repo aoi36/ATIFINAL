@@ -85,6 +85,29 @@ def init_db(db_conn):
       FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
       FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
     );
+
+     CREATE TABLE IF NOT EXISTS chat_conversations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              title TEXT,
+              ai_provider TEXT NOT NULL,
+              course_db_id INTEGER,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+              FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE SET NULL
+            );
+        
+      CREATE TABLE IF NOT EXISTS chat_messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              conversation_id INTEGER NOT NULL,
+              role TEXT NOT NULL,
+              content TEXT NOT NULL,
+              attachments TEXT,
+              token_count INTEGER,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (conversation_id) REFERENCES chat_conversations (id) ON DELETE CASCADE
+            );
     """
     # --- End SQL Schema ---
 

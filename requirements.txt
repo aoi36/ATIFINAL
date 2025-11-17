@@ -2,6 +2,7 @@
 
 google-generativeai
 PyJWT Werkzeug
+Werkzeug
 Flask
 Flask-Cors
 schedule
@@ -15,6 +16,7 @@ undetected-chromedriver
 selenium
 sounddevice
 soundfile
+anthropic
 requests
 beautifulsoup4
 python-docx
