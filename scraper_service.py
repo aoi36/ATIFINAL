@@ -311,47 +311,36 @@ The output you're seeing, with the "snippet" containing HTML-like <strong> tags,
 
 def parse_time_remaining(time_str: str) -> timedelta | None:
     """
-    Parses Vietnamese 'Time Remaining' strings like 'Còn lại X Các ngày Y giờ'.
-    Returns a timedelta object representing the duration, or None if parsing fails.
+    Parses Vietnamese/English 'Time Remaining' strings.
+    e.g., "Còn lại 11 Các ngày 12 giờ"
+    e.g., "11 days 12 hours"
+    e.g., "30 phút"
     """
-    days = 0
-    hours = 0
-    # Use regex to find days and hours, making numbers optional
-    # Handles "Còn lại X Các ngày Y giờ", "X Các ngày", "Y giờ"
-    match = re.search(r'(?:(\d+)\s*Các ngày)?\s*(?:(\d+)\s*giờ)?', time_str, re.IGNORECASE)
-
-
-    if match:
-        days_str, hours_str = match.groups()
-        try:
-            days = int(days_str) if days_str else 0
-            hours = int(hours_str) if hours_str else 0
-            # Basic validation: ensure at least one part was found and positive
-            if days >= 0 and hours >= 0 and (days > 0 or hours > 0):
-                 return timedelta(days=days, hours=hours)
-            else:
-                 # Handle cases like "0 giờ" or just "Còn lại" if regex matches unexpectedly
-                 print(f"         [Parse Time] Parsed zero or negative duration from '{time_str}'")
-                 return None
-        except (ValueError, TypeError):
-             print(f"         [Parse Time] Error converting parsed numbers from '{time_str}'")
-             return None # Error converting days/hours to int
-    else:
-        # Add handling for minutes if needed, e.g., 'Z phút'
-        match_minutes = re.search(r'(\d+)\s*phút', time_str, re.IGNORECASE)
-        if match_minutes:
-            try:
-                minutes = int(match_minutes.group(1))
-                if minutes >= 0:
-                    # Approximation: If only minutes left, treat as due very soon
-                    return timedelta(minutes=minutes)
-            except (ValueError, TypeError):
-                 print(f"         [Parse Time] Error converting parsed minutes from '{time_str}'")
-                 return None
-
-
-        print(f"         [Parse Time] Could not parse duration from '{time_str}'")
-        return None # Pattern not found
+    try:
+        days, hours, minutes = 0, 0, 0
+        
+        # Use re.IGNORECASE to match "days" or "Ngày"
+        days_match = re.search(r'(\d+)\s*(?:Các ngày|days)', time_str, re.IGNORECASE)
+        hours_match = re.search(r'(\d+)\s*(?:giờ|hours)', time_str, re.IGNORECASE)
+        minutes_match = re.search(r'(\d+)\s*(?:phút|minutes)', time_str, re.IGNORECASE)
+        
+        if days_match: days = int(days_match.group(1))
+        if hours_match: hours = int(hours_match.group(1))
+        if minutes_match: minutes = int(minutes_match.group(1))
+        
+        # Check if any time was found
+        if days > 0 or hours > 0 or minutes > 0:
+            return timedelta(days=days, hours=hours, minutes=minutes)
+        
+        # Fallback for "0" or "n/a"
+        if "0" in time_str: 
+            return timedelta(seconds=0)
+        
+        print(f"         [Parse Time] Could not find days/hours/minutes in '{time_str}'")
+        return None
+    except Exception as e:
+        print(f"         [Parse Time] Error parsing '{time_str}': {e}")
+        return None
 
 def read_docx(file_path: str) -> str:
     # ... (Paste your full function code here) ...
@@ -934,69 +923,76 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
                     # --- Check Deadlines and Save Assignments ---
                     if "mod/assign/" in href or "mod/quiz/" in href:
                         
-                        # --- [THIS PART IS FOR DEADLINES] ---
+                        # --- 1. Assignment Logic ---
+                        if "mod/assign/" in href:
+                            try:
+                                soup = BeautifulSoup(current_page_source, 'html.parser')
+                                assignment_title = None
+                                h2_tag = soup.find('h2')
+                                if h2_tag:
+                                    assignment_title = h2_tag.get_text(strip=True)
+                                if not assignment_title:
+                                    title_tag = soup.find('title')
+                                    if title_tag:
+                                        assignment_title = title_tag.get_text(strip=True)
+                                if assignment_title and course_name in assignment_title:
+                                    assignment_title = assignment_title.replace(course_name, '', 1).strip()
+                                    assignment_title = re.sub(r'^[\s:\-]+', '', assignment_title)
+                                if not assignment_title or assignment_title == course_name:
+                                    assignment_title = link_text or href
+                                if assignment_title and href:
+                                    assignments_to_add.append((user_id, course_db_id, assignment_title, href))
+                                    print(f"            📋 Assignment Found: {assignment_title}")
+                            except Exception as title_e:
+                                print(f"            ⚠️ Error extracting assignment title: {title_e}")
+                        
+                        # --- 2. Deadline Logic ---
+                        # [FIX] This block is now correctly indented
                         deadline_info = get_deadline_info(current_page_source)
                         if deadline_info:
                             all_found_deadline_urls.add(href) 
                             original_time_str = deadline_info.get("time")
                             iso_timestamp = None
-                            
-                            # Clean the string and parse date (this is your fix from before)
-                            if original_time_str and deadline_info.get("status") == "Due":
+                            clean_time_str = original_time_str.strip() if original_time_str else None
+                            status = deadline_info.get("status")
+
+                            if clean_time_str and status == "Due":
                                 try:
-                                    clean_time_str = original_time_str.strip()
+                                    clean_time_str = original_time_str.strip() 
                                     parsed_datetime = date_parser.parse(clean_time_str, dayfirst=True)
                                     iso_timestamp = parsed_datetime.isoformat()
                                 except Exception as parse_e:
-                                    print(f"               ⚠️ Could not parse deadline string '{original_time_str}': {parse_e}")
-                            elif original_time_str and deadline_info.get("status") == "Time Remaining":
-                                time_delta = parse_time_remaining(original_time_str)
-                                if time_delta:
-                                    iso_timestamp = (datetime.now() + time_delta).isoformat()
-                                else:
-                                    print(f"               ⚠️ Could not calculate relative time: '{original_time_str}'")
+                                    print(f"               ⚠️ Could not parse 'Due' date string '{original_time_str}': {parse_e}")
+                            
+                            elif clean_time_str and status == "Overdue":
+                                try:
+                                    time_delta = parse_time_remaining(clean_time_str)
+                                    if time_delta:
+                                        iso_timestamp = (datetime.now() - time_delta).isoformat()
+                                    else:
+                                        print(f"               ⚠️ Could not calculate relative 'Overdue' time: '{original_time_str}'")
+                                except Exception as parse_e:
+                                    print(f"               ⚠️ Error parsing 'Overdue' date string '{original_time_str}': {parse_e}")
+                            
+                            elif clean_time_str and status == "Time Remaining":
+                                try:
+                                    time_delta = parse_time_remaining(clean_time_str) 
+                                    if time_delta:
+                                        iso_timestamp = (datetime.now() + time_delta).isoformat()
+                                    else:
+                                        print(f"               ⚠️ Could not calculate relative time: '{original_time_str}'")
+                                except Exception as parse_e:
+                                     print(f"               ⚠️ Error parsing 'Time Remaining': {parse_e}")
 
                             deadlines_to_add.append((
                                 user_id, 
-                                course_db_id, # The local DB ID
-                                deadline_info.get('status'),
-                                deadline_info.get('time'), 
-                                iso_timestamp, 
+                                course_db_id,
+                                status,
+                                original_time_str,
+                                iso_timestamp,
                                 href
                             ))
                             print(f"            🎯 Deadline Found (Method: {deadline_info.get('method', 'N/A')})")
-                        
-                        # --- [THIS IS YOUR NEW ASSIGNMENT LOGIC, MODIFIED] ---
-                        if "mod/assign/" in href: # Only for assignments, not quizzes
-                            try:
-                                # (We assume BeautifulSoup is imported at the top of the file)
-                                soup = BeautifulSoup(current_page_source, 'html.parser')
-
-                                assignment_title = None
-                                h2_tag = soup.find('h2')
-                                if h2_tag:
-                                    assignment_title = h2_tag.get_text(strip=True)
-
-                                if not assignment_title:
-                                    title_tag = soup.find('title')
-                                    if title_tag:
-                                        assignment_title = title_tag.get_text(strip=True)
-
-                                if assignment_title and course_name in assignment_title:
-                                    assignment_title = assignment_title.replace(course_name, '', 1).strip()
-                                    assignment_title = re.sub(r'^[\s:\-]+', '', assignment_title)
-
-                                if not assignment_title or assignment_title == course_name:
-                                    assignment_title = link_text or href # Fallback to link text
-
-                                if assignment_title and href:
-                                    # [FIX] Add user_id and course_db_id
-                                    assignments_to_add.append((user_id, course_db_id, assignment_title, href))
-                                    print(f"            📋 Assignment Found: {assignment_title}")
-                                    
-                            except Exception as title_e:
-                                print(f"            ⚠️ Error extracting assignment title: {title_e}")
-                        # --- [END NEW ASSIGNMENT LOGIC] ---
             # --- End Subpage Loop ---
 
             # --- Save deadlines for this course to DB ---
