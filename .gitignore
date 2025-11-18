@@ -1,0 +1,87 @@
+# ===========================
+# SECRETS & CONFIG (CRITICAL)
+# ===========================
+.env
+service_account.json
+client_secret.json
+google_credentials.json
+
+# ===========================
+# PYTHON / BACKEND
+# ===========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ===========================
+# DATABASE
+# ===========================
+*.db
+*.sqlite3
+lms_data.db
+
+# ===========================
+# PROJECT SPECIFIC (GENERATED DATA)
+# ===========================
+# Scraped course materials (can be very large)
+courses_data/
+
+# Whoosh Search Index
+search_index/
+
+# Temporary uploads folder
+uploads/
+
+# Meeting recordings (Large video/audio files)
+meet_recordings/
+
+# State tracking files
+scrape_state.json
+scrape_state_*.json
+study_plan_meta.json
+study_plan_meta_*.json
+
+# ===========================
+# FRONTEND (NODE / REACT)
+# ===========================
+node_modules/
+.npm/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ===========================
+# IDE & OS FILES
+# ===========================
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini

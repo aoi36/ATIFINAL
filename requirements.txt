@@ -1,7 +1,7 @@
 # requirements.txt
 
 google-generativeai
-PyJWT Werkzeug
+PyJWT 
 Werkzeug
 Flask
 Flask-Cors
@@ -31,8 +31,5 @@ google-auth-httplib2
 googleapiclient  # Extra
 plyer
 pyttsx3
-calendar_service
 pytz
-numpy
-schedule
 python-dateutil

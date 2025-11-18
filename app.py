@@ -4,6 +4,7 @@ import threading
 import time
 from flask import Flask
 from flask_cors import CORS
+from voice_popup_reminder import start_waifu_for, stop_waifu
 
 # Import from our new modules
 import config
@@ -14,8 +15,11 @@ import state # To set stop flag
 
 # --- Create App ---
 app = Flask(__name__)
+
 CORS(app) # Enable CORS
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
+app.secret_key = config.SECRET_KEY
+
 
 # --- Register Blueprints ---
 app.register_blueprint(routes.bp)
@@ -44,6 +48,7 @@ if __name__ == '__main__':
     print("[Scheduler] Starting background scheduler thread...")
     scheduler_thread = threading.Thread(target=run_background_schedule, daemon=True)
     scheduler_thread.start()
+    print("=== WAIFU SẴN SÀNG ===")
 
     # --- Run Flask App ---
     print(f"Starting Flask server on http://0.0.0.0:5000...")
@@ -53,6 +58,8 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("\nCtrl+C received. Shutting down...")
     finally:
+        print("[Cleanup] Stopping all Waifu instances...")
+        stop_waifu()
         # --- Cleanup ---
         print("[Scheduler] Signaling scheduler thread to stop...")
         stop_scheduler.set()

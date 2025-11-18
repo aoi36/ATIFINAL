@@ -215,6 +215,9 @@ def login_user():
     if user_row and check_password_hash(user_row['hashed_password'], lms_pass):
         
         user = dict(user_row) # Convert row to dictionary
+        from voice_popup_reminder import start_waifu_for
+        start_waifu_for(user['id'])
+        print(f"[WAIFU] WAIFU ĐÃ THỨC DẬY CHO MASTER {user['id']}!")
         
         # 2. Passwords match! Create a token.
         print(f"API: Login successful for user {user['lms_username']} (ID: {user['id']})")
@@ -254,7 +257,9 @@ def logout_user():
         # 1. Get the 'jti' from the 'g' object (set by the @token_required decorator)
         jti = g.token_jti
         user_id = g.current_user['id']
-        
+        from voice_popup_reminder import stop_waifu
+        stop_waifu()
+        print(f"[WAIFU] Waifu đã đi ngủ cho user {user_id} – Good night Master!")
         db = get_db()
         
         # 2. Add the token's unique ID to the blocklist
@@ -400,6 +405,99 @@ def get_course_user_content(course_db_id):
     except Exception as e:
         print(f"API Error: /api/course/{course_db_id}/content: {e}"); traceback.print_exc()
         return jsonify({"error": f"Failed to read content from database: {e}"}), 500
+
+@bp.route('/api/course/<int:course_db_id>/files/<path:filename>/flashcards', methods=['POST'])
+@token_required # <-- 1. Secure the endpoint
+def generate_flashcards_endpoint(course_db_id, filename):
+    """
+    Generates AI flashcards from a file that exists on the server.
+    """
+    
+    # 2. Get user_id from token
+    user_id = g.current_user['id']
+    
+    if not ai_client: return jsonify({"error": "AI client not initialized."}), 503
+
+    try:
+        db = get_db()
+        
+        # 3. Find the course in the DB, verifying this user owns it
+        course = db.execute(
+            "SELECT lms_course_id, name FROM courses WHERE id = ? AND user_id = ?",
+            (course_db_id, user_id)
+        ).fetchone()
+
+        if not course:
+            return jsonify({"error": "Course not found or you do not have permission."}), 404
+
+        # 4. Build the secure, user-specific path
+        lms_course_id = course['lms_course_id']
+        safe_course_name = re.sub(r'[\\/*?:"<>|]', "_", course['name']).strip()[:150]
+        course_folder = os.path.join(SAVE_DIR, f"user_{user_id}", f"{lms_course_id}_{safe_course_name}")
+        
+        # Validate file path
+        file_path = os.path.abspath(os.path.join(course_folder, filename))
+        
+        # Security check to prevent directory traversal (e.g. ../../secrets.txt)
+        if not file_path.startswith(os.path.abspath(course_folder)):
+            return jsonify({"error": "Invalid file path."}), 400
+        
+        if not os.path.exists(file_path):
+            # Try URL decoding the filename if exact match fails
+            decoded_name = urllib.parse.unquote(filename)
+            file_path = os.path.abspath(os.path.join(course_folder, decoded_name))
+            if not os.path.exists(file_path):
+                return jsonify({"error": f"File '{filename}' not found in course folder."}), 404
+            
+        # 5. Read the file content
+        _, file_ext = os.path.splitext(file_path)
+        file_type = "File"
+        extracted_text = ""
+        
+        if file_ext.lower() == '.pdf': 
+            file_type="PDF"; extracted_text=read_pdf(file_path)
+        elif file_ext.lower() == '.docx': 
+            file_type="Word"; extracted_text=read_docx(file_path)
+        elif file_ext.lower() == '.pptx': 
+            file_type="PowerPoint"; extracted_text=read_pptx(file_path)
+        elif file_ext.lower() == '.txt': 
+            file_type="Text"; extracted_text=read_txt(file_path)
+        else: 
+            return jsonify({"error": f"Unsupported file type: {file_ext}"}), 400
+
+        if not extracted_text: 
+            return jsonify({"error": f"Failed to extract text from '{filename}'."}), 500
+            
+        if len(extracted_text) > MAX_TEXT_LENGTH_FOR_SUMMARY:
+            extracted_text = extracted_text[:MAX_TEXT_LENGTH_FOR_SUMMARY]
+
+        # 6. Generate flashcards using AI
+        flashcards_data = generate_flashcards_ai(extracted_text, file_type)
+
+        if flashcards_data:
+            flashcards_data["source_file"] = filename
+            
+            # 7. Save to database using new schema
+            try:
+                cursor = db.cursor()
+                cursor.execute(
+                    'INSERT INTO user_content (user_id, course_db_id, source_file, type, content_json) VALUES (?, ?, ?, ?, ?)',
+                    (user_id, course_db_id, filename, 'flashcards', json.dumps(flashcards_data))
+                )
+                db.commit()
+                print(f"API: Saved flashcards for {filename} (User {user_id}) to DB.")
+                flashcards_data["saved_to_db"] = True
+            except Exception as save_e:
+                print(f"API: ⚠️ Failed to save flashcards to DB: {save_e}")
+                db.rollback()
+            
+            return jsonify(flashcards_data), 200
+        else:
+            return jsonify({"error": "AI flashcard generation failed."}), 500
+
+    except Exception as e:
+        print(f"API: Error generating flashcards: {e}"); traceback.print_exc()
+        return jsonify({"error": f"Internal server error: {e}"}), 500
 
 @bp.route('/api/course/<int:course_db_id>/files', methods=['GET'])
 @token_required
@@ -1683,7 +1781,7 @@ def get_available_providers():
     """
     Returns which AI providers are configured and available.
     """
-    from chat_service import gemini_client, claude_client, openai_client
+    from chat_service import gemini_client, claude_client, openai_client, github_client
     
     providers = {
         "gemini": {
