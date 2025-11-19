@@ -845,6 +845,9 @@ def get_hint_endpoint():
 @token_required
 def schedule_meet_endpoint():
     """Schedules an AUTOMATED Google Meet join & record task."""
+
+    user_id = g.current_user['id']
+
     data = request.json
     meet_link = data.get('meet_link')
     
@@ -879,7 +882,8 @@ def schedule_meet_endpoint():
                 meet_link,
                 duration_minutes,
                 MEET_RECORDING_DIR,
-                user_name  # <-- Pass the user_name
+                user_name,  # <-- Pass the user_name
+                user_id
             ]
         )
         timer.start() 
@@ -895,6 +899,64 @@ def schedule_meet_endpoint():
         return jsonify({"error": f"Failed to schedule automated Meet task: {e}"}), 500
 
 # --- Google Calendar Routes ---
+@bp.route('/api/recordings', methods=['GET'])
+@token_required
+def get_recordings():
+    """Lists all recordings belonging to the logged-in user."""
+    user_id = g.current_user['id']
+    
+    try:
+        all_files = os.listdir(MEET_RECORDING_DIR)
+        user_files = []
+        
+        prefix = f"{user_id}_"
+        
+        for filename in all_files:
+            # --- [FIX] Filter out temporary files ---
+            if "_temp_" in filename:
+                continue
+            # ----------------------------------------
+
+            if filename.startswith(prefix) and (filename.endswith(".mp4") or filename.endswith(".txt")):
+                display_name = filename[len(prefix):] 
+                file_path = os.path.join(MEET_RECORDING_DIR, filename)
+                
+                # Check if file is valid/readable
+                try:
+                    created_at = datetime.fromtimestamp(os.path.getctime(file_path)).strftime('%Y-%m-%d %H:%M')
+                    size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                except OSError:
+                    continue # Skip files currently being written/locked
+
+                user_files.append({
+                    "filename": filename,
+                    "display_name": display_name,
+                    "type": "Transcript" if filename.endswith(".txt") else "Video",
+                    "created_at": created_at,
+                    "size": f"{size_mb:.1f} MB"
+                })
+        
+        user_files.sort(key=lambda x: x['created_at'], reverse=True)
+        return jsonify(user_files)
+        
+    except Exception as e:
+        print(f"API Error: /api/recordings: {e}"); traceback.print_exc()
+        return jsonify({"error": f"Failed to list recordings: {e}"}), 500
+
+@bp.route('/api/recordings/<path:filename>', methods=['GET'])
+@token_required
+def download_recording(filename):
+    """Serves a recording file if it belongs to the user."""
+    user_id = g.current_user['id']
+    
+    # Security check: Ensure user owns this file
+    if not filename.startswith(f"{user_id}_"):
+        return jsonify({"error": "Permission denied."}), 403
+        
+    try:
+        return send_from_directory(MEET_RECORDING_DIR, filename, as_attachment=True)
+    except Exception as e:
+        return jsonify({"error": "File not found."}), 404
 
 @bp.route('/api/sync_calendar', methods=['POST'])
 @token_required # <-- 1. Add decorator

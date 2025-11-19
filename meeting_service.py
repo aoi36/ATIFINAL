@@ -202,18 +202,22 @@ def start_screen_recording(duration_seconds: int, output_filename: str):
                     print(f"   ⚠️ Could not delete temp file: {del_err}")
 
 
-# --- [FUNCTION 2] This is called by the API route ---
-def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int, output_dir: str, user_name: str = "Assistant"):
+# meeting_service.py
+
+# ... (keep imports and other functions as they are) ...
+
+def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int, output_dir: str, user_name: str = "Assistant", user_id: int = 0):
     """
     Launches a dedicated Selenium browser, grants permissions,
     enters name, clicks Ask to join, and starts recording.
     """
-    print(f"\n🚀 Attempting automated join for: {meet_link} as '{user_name}'")
+    print(f"\n🚀 Attempting automated join for: {meet_link} as '{user_name}' (User ID: {user_id})")
     driver = None
     
     try:
         options = uc.ChromeOptions()
         options.add_argument("--start-maximized")
+        # Allow microphone/camera permissions automatically
         prefs = {
             "profile.default_content_setting_values.media_stream_mic": 1,
             "profile.default_content_setting_values.media_stream_camera": 1,
@@ -221,24 +225,43 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
         }
         options.add_experimental_option("prefs", prefs)
 
-        driver = uc.Chrome(options=options, version_main=None) # Auto-detect version
+        # Auto-detect version
+        driver = uc.Chrome(options=options, version_main=None)
 
         print("   Navigating to Google Meet link...")
         driver.get(meet_link)
-        time.sleep(3) 
+        time.sleep(4) # Wait a bit longer for initial load
 
-        # --- Wait for name input field and enter name ---
+        # --- 1. Try to clear any "Got it" / "Dismiss" popups first ---
+        try:
+            dismiss_selectors = [
+                (By.XPATH, "//span[contains(text(), 'Got it')]"),
+                (By.XPATH, "//span[contains(text(), 'Dismiss')]"),
+                (By.XPATH, "//span[contains(text(), 'Không, cảm ơn')]"), # Vietnamese
+            ]
+            for by, sel in dismiss_selectors:
+                try:
+                    btn = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((by, sel)))
+                    driver.execute_script("arguments[0].click();", btn)
+                    print("   Clicked dismiss popup.")
+                    time.sleep(1)
+                    break
+                except: continue
+        except: pass
+
+        # --- 2. Wait for name input field and enter name ---
         try:
             print("   Waiting for name input field...")
             name_input = None
             name_selectors = [
                 (By.CSS_SELECTOR, "input[aria-label='Your name']"),
                 (By.CSS_SELECTOR, "input[placeholder='Your name']"),
-                (By.XPATH, "//input[@type='text' and contains(@aria-label, 'name')]")
+                (By.XPATH, "//input[@type='text' and contains(@aria-label, 'name')]"),
+                (By.XPATH, "//input[@type='text']") # Fallback generic text input
             ]
             for by_type, selector in name_selectors:
                 try:
-                    name_input = WebDriverWait(driver, 10).until(
+                    name_input = WebDriverWait(driver, 5).until(
                         EC.visibility_of_element_located((by_type, selector))
                     )
                     print(f"   ✅ Found name input using: {selector}")
@@ -252,36 +275,52 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
                 name_input.send_keys(user_name)
                 print(f"   ✅ Typed name: {user_name}")
             else:
-                print("   ⚠️ Name input field not found. Trying to join anyway.")
+                print("   ⚠️ Name input field not found. Trying to join anyway (might be logged in or pre-filled).")
         except Exception as e:
             print(f"   ⚠️ Error entering name: {e}")
-            traceback.print_exc()
 
-        # --- Wait and click "Ask to join" or "Join now" button ---
+        # --- 3. Wait and click "Ask to join" or "Join now" button ---
+        # [FIX] Updated selectors to be much more robust
         try:
             print("   Waiting for join button to become clickable...")
             join_button = None
             button_selectors = [
-                (By.XPATH, "//button[.//span[contains(text(), 'Ask to join')]]"),
-                (By.XPATH, "//button[.//span[contains(text(), 'Join now')]]")
+                # Method A: Text inside a span (Most common for Google Material Design)
+                (By.XPATH, "//span[contains(text(), 'Ask to join')]"),
+                (By.XPATH, "//span[contains(text(), 'Join now')]"),
+                
+                # Method B: Text anywhere inside a button element
+                (By.XPATH, "//button[contains(., 'Ask to join')]"),
+                (By.XPATH, "//button[contains(., 'Join now')]"),
+                
+                # Method C: Vietnamese Support (Just in case)
+                (By.XPATH, "//span[contains(text(), 'Yêu cầu tham gia')]"),
+                (By.XPATH, "//span[contains(text(), 'Tham gia ngay')]"),
+                (By.XPATH, "//button[contains(., 'Yêu cầu tham gia')]"),
+                (By.XPATH, "//button[contains(., 'Tham gia ngay')]"),
             ]
+
             for by_type, selector in button_selectors:
                 try:
-                    join_button = WebDriverWait(driver, 15).until(
+                    # Check if it exists and is visible
+                    join_button = WebDriverWait(driver, 3).until(
                         EC.element_to_be_clickable((by_type, selector))
                     )
                     print(f"   ✅ Found join button using: {selector}")
                     break
                 except TimeoutException:
                     continue
+
             if join_button:
-                button_text = join_button.text or "Join"
-                print(f"   ✅ Clicking '{button_text}' button...")
+                # Use JavaScript click which is more reliable for overlaid elements
                 driver.execute_script("arguments[0].click();", join_button)
-                print(f"   ✅ Successfully clicked button.")
+                print(f"   ✅ Successfully clicked Join button.")
                 time.sleep(5) # Wait for meeting to load
             else:
-                print("   ❌ Could not find a clickable join button.")
+                print("   ❌ Could not find a clickable join button (tried all selectors).")
+                # Take a screenshot for debugging if it fails
+                driver.save_screenshot("join_fail_debug.png") 
+
         except Exception as click_err:
             print(f"   ❌ Error clicking join button: {click_err}")
             traceback.print_exc()
@@ -290,22 +329,23 @@ def join_meet_automated_and_record(meet_link: str, record_duration_minutes: int,
         print("   Proceeding to start recording...")
         duration_sec = record_duration_minutes * 60
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filepath = os.path.join(output_dir, f"meet_recording_{timestamp}.mp4")
+        
+        filename = f"{user_id}_meet_recording_{timestamp}.mp4"
+        output_filepath = os.path.join(output_dir, filename)
 
         rec_thread = threading.Thread(
-            target=start_screen_recording, # This now calls the correct function
+            target=start_screen_recording, 
             args=(duration_sec, output_filepath),
             daemon=True
         )
         rec_thread.start()
         
-        print(f"🔴 Recording thread started in background for {record_duration_minutes} min.")
+        print(f"🔴 Recording thread started in background for {record_duration_minutes} min. File: {filename}")
 
     except Exception as e:
         print(f"❌ Failed during automated join process: {e}")
         traceback.print_exc()
     finally:
         print("   Automated join function finished (browser instance may remain open).")
-        # We don't quit the driver here, as it would close the meeting.
 
     return schedule.CancelJob

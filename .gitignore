@@ -5,6 +5,7 @@
 service_account.json
 client_secret.json
 google_credentials.json
+credentials.json
 
 # ===========================
 # PYTHON / BACKEND
