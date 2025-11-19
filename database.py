@@ -108,6 +108,107 @@ def init_db(db_conn):
               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY (conversation_id) REFERENCES chat_conversations (id) ON DELETE CASCADE
             );
+
+    /* ===== AI Learning Insights Tables ===== */
+
+    /* Tracks learning progress per course */
+    CREATE TABLE IF NOT EXISTS learning_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER NOT NULL,
+      completed_topics INTEGER DEFAULT 0,
+      total_topics INTEGER DEFAULT 0,
+      progress_percentage REAL DEFAULT 0.0,
+      planned_completion_date TEXT,
+      actual_completion_date TEXT,
+      is_behind_schedule INTEGER DEFAULT 0,
+      last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, course_db_id),
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
+    );
+
+    /* Records individual study sessions */
+    CREATE TABLE IF NOT EXISTS study_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER NOT NULL,
+      session_date DATE NOT NULL,
+      start_time TIME NOT NULL,
+      end_time TIME NOT NULL,
+      duration_minutes INTEGER NOT NULL,
+      topics_studied TEXT,
+      content_type TEXT,
+      difficulty_level TEXT,
+      focus_score REAL DEFAULT 0.0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
+    );
+
+    /* Weekly statistics for trend analysis */
+    CREATE TABLE IF NOT EXISTS weekly_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER NOT NULL,
+      week_start_date DATE NOT NULL,
+      week_end_date DATE NOT NULL,
+      total_study_hours REAL DEFAULT 0.0,
+      sessions_count INTEGER DEFAULT 0,
+      topics_completed INTEGER DEFAULT 0,
+      average_focus_score REAL DEFAULT 0.0,
+      quiz_average_score REAL DEFAULT 0.0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
+    );
+
+    /* Learning patterns analysis */
+    CREATE TABLE IF NOT EXISTS learning_patterns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      preferred_study_time TEXT,
+      optimal_session_duration INTEGER,
+      most_productive_day TEXT,
+      preferred_content_type TEXT,
+      average_daily_study_hours REAL DEFAULT 0.0,
+      learning_style TEXT,
+      peak_focus_hours TEXT,
+      last_analyzed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
+    );
+
+    /* AI-generated recommendations */
+    CREATE TABLE IF NOT EXISTS ai_recommendations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER,
+      recommendation_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      priority TEXT DEFAULT 'medium',
+      is_addressed INTEGER DEFAULT 0,
+      addressed_date TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE SET NULL
+    );
+
+    /* Topics requiring improvement */
+    CREATE TABLE IF NOT EXISTS weak_topics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      course_db_id INTEGER NOT NULL,
+      topic_name TEXT NOT NULL,
+      last_quiz_score REAL DEFAULT 0.0,
+      attempts_count INTEGER DEFAULT 0,
+      last_attempted TIMESTAMP,
+      recommendation_given INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+      FOREIGN KEY (course_db_id) REFERENCES courses (id) ON DELETE CASCADE
+    );
     """
     # --- End SQL Schema ---
 

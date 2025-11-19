@@ -20,7 +20,12 @@ from flask import (
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
-
+from learning_insights_service import (
+    update_learning_progress, get_progress_by_course, get_all_user_progress,
+    check_behind_schedule_alerts, analyze_learning_habits, log_study_session,
+    log_weekly_stats, compare_weekly_progress, add_weak_topic,
+    generate_personalized_recommendations, get_active_recommendations
+)
 # Import services and helpers
 import state
 import schedule # For the meet scheduler
@@ -1870,3 +1875,318 @@ def get_available_providers():
     }
     
     return jsonify(providers), 200
+
+# ===== AI LEARNING INSIGHTS API ENDPOINTS =====
+
+@bp.route('/api/insights/progress/<int:course_db_id>', methods=['GET'])
+@token_required
+def get_course_progress(course_db_id):
+    """
+    Gets learning progress for a specific course.
+    
+    Returns:
+        Progress data with percentage, topics completed, and alert status
+    """
+    user_id = g.current_user['id']
+
+    try:
+        progress = get_progress_by_course(user_id, course_db_id)
+
+        if not progress:
+            return jsonify({"message": "No progress data found for this course"}), 404
+
+        return jsonify({
+            "success": True,
+            "data": progress
+        }), 200
+    except Exception as e:
+        print(f"[API] Error getting course progress: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/progress/all', methods=['GET'])
+@token_required
+def get_all_progress():
+    """
+    Gets learning progress for all courses.
+    
+    Returns:
+        List of progress records across all courses
+    """
+    user_id = g.current_user['id']
+
+    try:
+        progress_list = get_all_user_progress(user_id)
+
+        return jsonify({
+            "success": True,
+            "total_courses": len(progress_list),
+            "data": progress_list
+        }), 200
+    except Exception as e:
+        print(f"[API] Error getting all progress: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/alerts', methods=['GET'])
+@token_required
+def get_behind_schedule_alerts():
+    """
+    Checks all courses and returns alerts for courses where user is behind.
+    
+    Returns:
+        List of alert messages
+    """
+    user_id = g.current_user['id']
+
+    try:
+        alerts = check_behind_schedule_alerts(user_id)
+
+        return jsonify({
+            "success": True,
+            "alert_count": len(alerts),
+            "alerts": alerts
+        }), 200
+    except Exception as e:
+        print(f"[API] Error getting alerts: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/progress/update', methods=['POST'])
+@token_required
+def update_progress():
+    """
+    Updates learning progress for a course.
+    
+    Request body:
+    {
+        "course_db_id": 1,
+        "completed_topics": 5,
+        "total_topics": 10
+    }
+    """
+    user_id = g.current_user['id']
+    data = request.json
+
+    if not data or 'course_db_id' not in data or 'completed_topics' not in data or 'total_topics' not in data:
+        return jsonify({"error": "Missing required fields"}), 400
+
+    try:
+        course_db_id = data['course_db_id']
+        completed = data['completed_topics']
+        total = data['total_topics']
+
+        result = update_learning_progress(user_id, course_db_id, completed, total)
+
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 500
+    except Exception as e:
+        print(f"[API] Error updating progress: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/habits', methods=['GET'])
+@token_required
+def get_learning_habits():
+    """
+    Analyzes user's learning habits and recommends optimal study times.
+    
+    Returns:
+        Analysis of study patterns with recommendations
+    """
+    user_id = g.current_user['id']
+
+    try:
+        habits = analyze_learning_habits(user_id)
+        return jsonify(habits), 200
+    except Exception as e:
+        print(f"[API] Error analyzing habits: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/session/log', methods=['POST'])
+@token_required
+def log_session():
+    """
+    Logs a study session for learning analytics.
+    
+    Request body:
+    {
+        "course_db_id": 1,
+        "session_date": "2025-11-18",
+        "start_time": "14:00:00",
+        "end_time": "15:30:00",
+        "topics_studied": "Arrays, Linked Lists",
+        "content_type": "video",
+        "difficulty_level": "medium",
+        "focus_score": 85.0
+    }
+    """
+    user_id = g.current_user['id']
+    data = request.json
+
+    required_fields = ['course_db_id', 'session_date', 'start_time', 'end_time', 
+                      'topics_studied', 'content_type', 'difficulty_level']
+
+    if not data or not all(field in data for field in required_fields):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    try:
+        result = log_study_session(
+            user_id,
+            data['course_db_id'],
+            data['session_date'],
+            data['start_time'],
+            data['end_time'],
+            data['topics_studied'],
+            data['content_type'],
+            data['difficulty_level'],
+            data.get('focus_score', 0.0)
+        )
+
+        if result['success']:
+            return jsonify(result), 201
+        else:
+            return jsonify(result), 500
+    except Exception as e:
+        print(f"[API] Error logging session: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/weekly/compare/<int:course_db_id>', methods=['GET'])
+@token_required
+def get_weekly_comparison(course_db_id):
+    """
+    Compares weekly results to identify trends and improvement areas.
+    
+    Returns:
+        Weekly trend analysis with insights
+    """
+    user_id = g.current_user['id']
+
+    try:
+        comparison = compare_weekly_progress(user_id, course_db_id)
+        return jsonify(comparison), 200
+    except Exception as e:
+        print(f"[API] Error comparing weekly progress: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/weak-topics/add', methods=['POST'])
+@token_required
+def add_weak_topic_endpoint():
+    """
+    Records a topic that user struggled with.
+    
+    Request body:
+    {
+        "course_db_id": 1,
+        "topic_name": "Recursion",
+        "last_quiz_score": 45.5
+    }
+    """
+    user_id = g.current_user['id']
+    data = request.json
+
+    if not data or 'course_db_id' not in data or 'topic_name' not in data:
+        return jsonify({"error": "Missing required fields"}), 400
+
+    try:
+        result = add_weak_topic(
+            user_id,
+            data['course_db_id'],
+            data['topic_name'],
+            data.get('last_quiz_score', 0.0)
+        )
+
+        if result['success']:
+            return jsonify(result), 201
+        else:
+            return jsonify(result), 500
+    except Exception as e:
+        print(f"[API] Error adding weak topic: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/recommendations', methods=['GET'])
+@token_required
+def get_recommendations():
+    """
+    Gets active personalized recommendations for the user.
+    
+    Returns:
+        List of active AI-generated recommendations
+    """
+    user_id = g.current_user['id']
+
+    try:
+        recommendations = get_active_recommendations(user_id)
+
+        return jsonify({
+            "success": True,
+            "recommendations_count": len(recommendations),
+            "recommendations": recommendations
+        }), 200
+    except Exception as e:
+        print(f"[API] Error getting recommendations: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/recommendations/generate', methods=['POST'])
+@token_required
+def generate_recommendations():
+    """
+    Generates new personalized recommendations based on current learning data.
+    
+    Returns:
+        List of AI-generated recommendations
+    """
+    user_id = g.current_user['id']
+
+    try:
+        result = generate_personalized_recommendations(user_id)
+        return jsonify(result), 200 if result['success'] else 500
+    except Exception as e:
+        print(f"[API] Error generating recommendations: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/insights/dashboard', methods=['GET'])
+@token_required
+def get_insights_dashboard():
+    """
+    Gets a comprehensive learning insights dashboard with all key metrics.
+    
+    Returns:
+        Dashboard data including progress, alerts, habits, and recommendations
+    """
+    user_id = g.current_user['id']
+
+    try:
+        db = get_db()
+        # Fetch user's courses
+        courses = db.execute("""
+            SELECT id, name, url FROM courses WHERE user_id = ?
+        """, (user_id,)).fetchall()
+        courses_list = [dict(course) for course in courses]
+
+        dashboard = {
+            "user_id": user_id,
+            "generated_at": datetime.now().isoformat(),
+            "courses": courses_list,
+            "progress": get_all_user_progress(user_id),
+            "alerts": check_behind_schedule_alerts(user_id),
+            "habits": analyze_learning_habits(user_id),
+            "recommendations": get_active_recommendations(user_id)
+        }
+
+        return jsonify({
+            "success": True,
+            "dashboard": dashboard
+        }), 200
+    except Exception as e:
+        print(f"[API] Error getting dashboard: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
