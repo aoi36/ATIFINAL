@@ -563,6 +563,7 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
         return
     
     state.IS_SCRAPING = True
+    state.LAST_SCRAPE_RESULT = None
     print(f"\n🚀 Starting full scrape for user {lms_user} (ID: {user_id})...")
     
     driver = None
@@ -1058,6 +1059,11 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
         
         print("\n✅ Full scrape completed successfully.")
 
+        state.LAST_SCRAPE_RESULT = {
+            "success": True,
+            "message": "Scrape completed successfully."
+        }
+
     except Exception as scrape_e:
         print(f"\n❌ An error occurred during scraping: {scrape_e}")
         traceback.print_exc()
@@ -1067,6 +1073,11 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
         if index_writer:
              print("   [Search] Cancelling index writer due to error.")
              index_writer.cancel()
+
+             state.LAST_SCRAPE_RESULT = {
+            "success": False,
+            "message": str(scrape_e) 
+        }
     finally:
         if db:
              print("   [DB] Closing database connection...")
@@ -1075,5 +1086,5 @@ def perform_full_scrape(user_id, lms_user, lms_pass):
             print("   Closing WebDriver...")
             driver.quit()
         state.IS_SCRAPING = False # Reset flag
-        print("   Scrape function finished.")
+        print("   Scrape function finished. State reset to Idle.")
 # ==============================================================================

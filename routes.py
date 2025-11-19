@@ -323,9 +323,13 @@ def trigger_scrape():
 
 @bp.route('/api/scrape/status', methods=['GET'])
 def get_scrape_status():
-    """Checks the global 'is_scraping' flag."""
-    status_str = "scraping" if state.IS_SCRAPING else "idle"
-    return jsonify({"status": status_str})
+    """Checks the global 'is_scraping' flag and the last result."""
+    return jsonify({
+        "status": "scraping" if state.IS_SCRAPING else "idle",
+        # --- [FIX] Send the result to the frontend ---
+        "result": state.LAST_SCRAPE_RESULT 
+        # --- [END FIX] ---
+    })
 
 @bp.route('/api/courses', methods=['GET']) # <-- [FIX] Removed <user_id> from URL
 @token_required                          # <-- 1. Add decorator
