@@ -1,0 +1,136 @@
+/* Enhanced navigation with modern styling, better hover effects, and improved spacing */
+.navigation {
+  width: 280px;
+  background: linear-gradient(180deg, #f8f9fa 0%, #f3f4f6 100%);
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
+}
+
+.nav-header {
+  padding: 2rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+}
+
+.nav-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  letter-spacing: -0.5px;
+}
+
+.nav-menu {
+  list-style: none;
+  padding: 1.5rem 0;
+  flex: 1;
+}
+
+.nav-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1.5rem;
+  background: none;
+  color: #6b7280;
+  text-align: left;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border-left: 3px solid transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.nav-button:hover {
+  color: #111827;
+  background-color: #ede9fe;
+  border-left-color: #6366f1;
+  padding-left: 1.75rem;
+}
+
+.nav-button.active {
+  color: #6366f1;
+  background-color: #f3f4f6;
+  border-left-color: #6366f1;
+  font-weight: 600;
+}
+
+.nav-icon {
+  font-size: 1.25rem;
+  width: 1.5rem;
+  text-align: center;
+}
+
+.nav-logout {
+  padding: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.logout-button {
+  width: 100%;
+  padding: 0.875rem;
+  background-color: #fee2e2;
+  border: 1.5px solid #ef4444;
+  border-radius: 0.625rem;
+  color: #dc2626;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.95rem;
+}
+
+.logout-button:hover {
+  background-color: #fca5a5;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+@media (max-width: 768px) {
+  .navigation {
+    width: 100%;
+    flex-direction: row;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+
+  .nav-header {
+    flex: 1;
+    padding: 1rem;
+    border-bottom: none;
+    border-right: 1px solid #e5e7eb;
+  }
+
+  .nav-title {
+    font-size: 1.25rem;
+  }
+
+  .nav-menu {
+    display: flex;
+    padding: 0;
+    flex: none;
+  }
+
+  .nav-button {
+    padding: 1rem 1.25rem;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+
+  .nav-button:hover,
+  .nav-button.active {
+    border-left: none;
+    border-bottom-color: #6366f1;
+  }
+
+  .nav-logout {
+    padding: 0.75rem;
+    border-top: none;
+  }
+}

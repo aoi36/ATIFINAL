@@ -1,0 +1,124 @@
+/* Enhanced course detail page with improved file list, better button styling, and refined layout */
+.toggle-questions-button {
+  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.625rem;
+  cursor: pointer;
+  margin-top: 1rem;
+  font-weight: 700;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+.course-card h3{
+  color: black;
+}
+
+.toggle-questions-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
+}
+
+.options-list .correct-answer {
+  font-weight: 700;
+  color: #059669;
+}
+
+.file-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  transition: all 0.3s ease;
+}
+
+.file-item:hover {
+  background-color: #f9fafb;
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-info {
+  flex: 1;
+}
+
+.file-info a {
+  color: #6366f1;
+  text-decoration: none;
+  word-break: break-word;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.file-info a:hover {
+  color: #7c3aed;
+  text-decoration: underline;
+}
+
+.flashcard-button {
+  margin-left: 1rem;
+  padding: 0.625rem 1rem;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+}
+
+.flashcard-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
+}
+
+.flashcard-button:disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+  transform: none;
+}
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.file-info {
+  flex-grow: 1;
+}
+
+.flashcard-button {
+  background-color: #28a745; /* Green */
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-left: 10px;
+  transition: background-color 0.2s;
+}
+
+.flashcard-button:hover {
+  background-color: #218838;
+}
+
+.flashcard-button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}

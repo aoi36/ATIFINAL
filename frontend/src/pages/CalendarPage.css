@@ -1,0 +1,125 @@
+/* src/pages/CalendarPage.css */
+
+.calendar-page {
+  padding: 2rem;
+}
+
+.calendar-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.control-card .card-title {
+  margin-top: 0;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.75rem;
+}
+
+.control-card .button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.submit-button {
+  width: 100%;
+  padding: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  background: linear-gradient(90deg, #007bff 0%, #0056b3 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s;
+  box-shadow: 0 4px 15px rgba(0, 123, 255, 0.2);
+}
+.submit-button:hover {
+  opacity: 0.9;
+  transform: translateY(-2px);
+}
+.submit-button:disabled {
+  background: #aaa;
+  cursor: not-allowed;
+  transform: translateY(0);
+  opacity: 0.7;
+}
+
+.submit-button.secondary {
+  background: linear-gradient(90deg, #6c757d 0%, #343a40 100%);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+.form-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.form-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+.file-hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.5rem;
+}
+
+.calendar-card {
+  padding: 1.5rem;
+}
+
+/* --- FullCalendar Style Overrides --- */
+/* Make the calendar responsive and clean */
+.fc {
+  max-width: 100%;
+  margin: 0 auto;
+}
+.fc .fc-toolbar-title {
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+.fc .fc-button {
+  background: #007bff;
+  border: none;
+  opacity: 0.9;
+  transition: opacity 0.2s;
+}
+.fc .fc-button:hover {
+  opacity: 1;
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  background-color: #0056b3;
+}
+.fc .fc-daygrid-event {
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fc .fc-event-main {
+  color: #fff !important;
+}
+
+/* For the success/error alerts */
+.success-alert {
+  padding: 1rem;
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  text-align: center;
+  font-weight: 600;
+  cursor: pointer;
+}

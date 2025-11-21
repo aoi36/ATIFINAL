@@ -1,0 +1,171 @@
+/* src/pages/Dashboard.css */
+
+/* Enhanced dashboard with better grid layouts, improved stat cards, and refined spacing */
+.dashboard {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 30px; /* Added padding for consistency */
+  width: 100%;   /* Ensure it takes full width */
+  box-sizing: border-box;
+}
+
+.dashboard-header {
+  margin-bottom: 2.5rem;
+}
+
+.dashboard-title {
+  font-size: 2.25rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: #1a202c; /* Match other pages */
+  letter-spacing: -0.5px;
+}
+
+.dashboard-subtitle {
+  font-size: 1.1rem;
+  color: #718096; /* Match other pages */
+  margin: 0;
+  font-weight: 500;
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 2rem;
+}
+
+.stats-section {
+  width: 100%;
+}
+
+.stats-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); /* Slightly wider min */
+  gap: 1.5rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  background: white;
+  border: 1px solid #e2e8f0; /* Match other cards */
+  border-radius: 12px;       /* Match other cards */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04); /* Softer shadow */
+  transition: all 0.3s ease;
+}
+
+.stat:hover {
+  box-shadow: 0 10px 25px rgba(49, 130, 206, 0.15); /* Blue-tinted shadow */
+  transform: translateY(-4px);
+  border-color: #bee3f8;
+}
+
+.stat-label {
+  font-size: 0.85rem;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+
+.stat-value {
+  font-size: 2.25rem; /* Slightly larger */
+  font-weight: 800;
+  color: #3182ce; /* Use your app's primary blue */
+  letter-spacing: -1px;
+  line-height: 1;
+}
+
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 1.5rem 0;
+  color: #2d3748;
+  letter-spacing: -0.3px;
+  border-bottom: 1px solid #edf2f7;
+  padding-bottom: 10px;
+}
+
+.courses-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Wider cards */
+  gap: 1.5rem;
+}
+
+/* Ensure Card components inside behave well */
+.courses-grid .card { 
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.course-card {
+  min-height: 160px;
+}
+
+.course-description {
+  margin: 0;
+  color: #718096;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.no-data {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 4rem 2rem;
+  color: #a0aec0;
+  background: white;
+  border: 2px dashed #e2e8f0;
+  border-radius: 12px;
+  font-style: italic;
+}
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+/* Ensure Action Cards match the theme */
+.actions-grid .card {
+    border-left: 4px solid #3182ce;
+    transition: transform 0.2s;
+}
+.actions-grid .card:hover {
+    transform: translateY(-2px);
+}
+
+.action-description {
+  margin: 0;
+  color: #718096;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .dashboard {
+      padding: 15px;
+  }
+  
+  .dashboard-title {
+    font-size: 1.75rem;
+  }
+
+  .courses-grid,
+  .actions-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-content {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+    .stats-content {
+        grid-template-columns: 1fr;
+    }
+}

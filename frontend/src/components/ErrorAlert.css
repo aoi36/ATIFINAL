@@ -1,0 +1,40 @@
+.error-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--error);
+  border-radius: 0.5rem;
+  color: var(--error);
+  margin-bottom: 1rem;
+}
+
+.error-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.error-icon {
+  font-size: 1.25rem;
+}
+
+.error-message {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.error-close {
+  background: none;
+  color: var(--error);
+  font-size: 1.25rem;
+  padding: 0.25rem;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.error-close:hover {
+  transform: scale(1.1);
+}

@@ -1,0 +1,40 @@
+/* Modernized card styling with enhanced shadows, better transitions, and improved spacing */
+.card {
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.875rem;
+  padding: 1.5rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.card:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 10px 25px rgba(99, 102, 241, 0.12);
+  transform: translateY(-4px);
+}
+
+.card.clickable {
+  cursor: pointer;
+}
+
+.card-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem 0;
+  color: #111827;
+  letter-spacing: -0.3px;
+}
+
+.card-subtitle {
+  font-size: 0.875rem;
+  color: #9ca3af;
+  margin: 0 0 1rem 0;
+  font-weight: 500;
+}
+
+.card-content {
+  color: #6b7280;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}

@@ -1,0 +1,161 @@
+/* src/pages/StudyPlanPage.css */
+
+.study-plan-page {
+  padding: 2rem;
+}
+
+.waifu-message-card {
+  background: linear-gradient(135deg, #fce043 0%, #fbab4e 100%);
+  color: #333;
+  margin-bottom: 1.5rem;
+  border: none;
+  font-size: 1.1rem;
+  text-align: center;
+}
+.waifu-message-card p {
+  margin: 0;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.stat-value {
+  display: block;
+  font-size: 3rem;
+  font-weight: 700;
+  color: #007bff;
+  line-height: 1.1;
+}
+
+.stat-label {
+  display: block;
+  font-size: 1rem;
+  color: #555;
+  margin-top: 0.5rem;
+}
+
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.plan-card {
+  padding: 0; /* Remove default padding, we'll control it */
+  overflow: hidden; /* Ensure rounded corners */
+}
+
+.plan-card-header {
+  padding: 1.25rem 1.5rem;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.plan-card-title h2 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.plan-card-date {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.plan-card-time {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #007bff;
+  flex-shrink: 0;
+  margin-left: 1rem;
+}
+
+.plan-card-body {
+  padding: 1.5rem;
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 1.5rem;
+}
+
+.plan-detail-item {
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+.plan-detail-item strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.25rem;
+}
+.plan-detail-item p {
+  margin: 0;
+  color: #666;
+}
+.difficulty-stars {
+  font-size: 1.25rem;
+}
+
+.plan-card-breakdown {
+  font-size: 0.95rem;
+}
+.plan-card-breakdown strong {
+  color: #333;
+}
+.plan-card-breakdown ul {
+  padding-left: 20px;
+  margin: 0.5rem 0 0 0;
+  color: #666;
+}
+.plan-card-breakdown li {
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+}
+
+.plan-card-footer {
+  padding: 1rem 1.5rem;
+  background-color: #f8f9fa;
+  border-top: 1px solid #e9ecef;
+  display: flex;
+  gap: 1rem;
+}
+
+.plan-link {
+  font-weight: 600;
+  text-decoration: none;
+  color: #007bff;
+}
+.plan-link:hover {
+  text-decoration: underline;
+}
+
+/* Responsive layout for smaller screens */
+@media (max-width: 900px) {
+  .plan-card-body {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  .plan-card-header {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .plan-card-time {
+    margin-left: 0;
+  }
+}

@@ -1,0 +1,274 @@
+/* src/pages/ScraperPage.css */
+
+.scraper-page {
+  padding: 30px;
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.page-title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 30px;
+  color: #1a202c; /* Dark Gray */
+  text-align: center;
+}
+
+.scraper-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  margin-bottom: 30px;
+}
+
+/* --- Cards --- */
+/* Force white background and standard borders */
+.control-card,
+.logs-card,
+.info-card {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+}
+
+.card-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #2d3748 !important; /* Force dark title */
+  border-bottom: 1px solid #edf2f7;
+  padding-bottom: 10px;
+}
+
+.card-description {
+  font-size: 0.95rem;
+  color: #718096 !important; /* Medium Gray */
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+/* --- Status Box --- */
+.status-box {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  /* Light gray background to stand out from white card */
+  background-color: #f7fafc !important; 
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 20px;
+}
+
+.status-label {
+  margin: 0;
+  font-weight: 600;
+  color: #4a5568 !important; /* Dark Gray */
+}
+
+/* Status Badges */
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-badge.idle {
+  background-color: #edf2f7;
+  color: #4a5568;
+}
+
+.status-badge.scraping {
+  background-color: #bee3f8;
+  color: #2b6cb0;
+  animation: pulse 1.5s infinite;
+}
+
+.status-badge.completed {
+  background-color: #c6f6d5;
+  color: #276749;
+}
+
+.status-badge.error {
+  background-color: #fed7d7;
+  color: #9b2c2c;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+/* --- Inputs --- */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #2d3748 !important;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  font-size: 1rem;
+  box-sizing: border-box;
+  /* Force readable text */
+  background-color: #fff !important;
+  color: #1a202c !important; 
+}
+
+.form-input:disabled {
+  background-color: #f7fafc !important;
+  color: #a0aec0 !important;
+  cursor: not-allowed;
+}
+
+/* --- Button --- */
+.scrape-button {
+  padding: 12px;
+  background-color: #3182ce;
+  color: white;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  width: 100%;
+}
+
+.scrape-button:hover:not(:disabled) {
+  background-color: #2b6cb0;
+  transform: translateY(-1px);
+}
+
+.scrape-button:disabled {
+  background-color: #cbd5e0;
+  cursor: not-allowed;
+}
+
+/* --- Logs Container (The Terminal Look) --- */
+.logs-container {
+  flex: 1;
+  /* Force Dark Background for "Terminal" look */
+  background-color: #1a202c !important; 
+  border-radius: 8px;
+  padding: 15px;
+  overflow-y: auto;
+  min-height: 300px;
+  max-height: 500px;
+  border: 1px solid #2d3748;
+  font-family: "Courier New", monospace;
+  font-size: 0.9rem;
+}
+
+.log-entry {
+  display: flex;
+  gap: 15px;
+  padding: 6px 0;
+  border-bottom: 1px solid #2d3748;
+  line-height: 1.4;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: #718096 !important; /* Muted light gray */
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 80px;
+  font-size: 0.8rem;
+}
+
+.log-message {
+  color: #e2e8f0 !important; /* Bright white-ish text */
+  word-break: break-word;
+}
+
+.logs-empty {
+  color: #718096 !important;
+  text-align: center;
+  padding: 2rem;
+  margin: 0;
+  font-style: italic;
+}
+
+/* --- Success Alert --- */
+.success-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px;
+  background-color: #f0fff4;
+  border: 1px solid #c6f6d5;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.success-icon {
+  font-size: 1.25rem;
+  color: #38a169;
+  font-weight: bold;
+}
+
+.success-message {
+  margin: 0;
+  color: #276749;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+/* --- Info Section --- */
+.info-card {
+  margin-top: 0;
+}
+
+.info-content {
+  color: #4a5568 !important;
+  line-height: 1.6;
+}
+
+.info-content p {
+  margin: 0 0 1rem 0;
+  color: #4a5568 !important;
+}
+
+.info-list {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: #4a5568 !important;
+}
+
+.info-list li {
+  margin-bottom: 0.5rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .scraper-container {
+    grid-template-columns: 1fr;
+  }
+
+  .logs-container {
+    min-height: 200px;
+  }
+}
