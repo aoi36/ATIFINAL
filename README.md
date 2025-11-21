@@ -89,6 +89,16 @@ ENCRYPTION_KEY=random_key_for_fernet
 # Google Calendar
 GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json
 
+Place File: Put the credentials.json (your Service Account key file) in the root directory of your backend.
+Identify Email: Extract the client_email from the credentials.json file.
+Share Calendar:
+
++Go to your Google Calendar settings.
+
++Under "Share with specific people," add the client_email.
+
++Set the permissions level to "Make changes to events" (or higher).
+
 5. Google Calendar setup
 
 
