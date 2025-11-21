@@ -51,75 +51,67 @@
 
 Follow these steps to set up the **backend** and **frontend**. You can copy the entire block and execute step by step:
 
-----------------------------
-Backend Setup
-----------------------------
-Navigate to backend folder
-
+🚀 Backend Setup
+1. Navigate to the backend folder
 cd backend
 
-Create a virtual environment
-Windows
+2. Create a virtual environment
+
+Windows:
 
 python -m venv venv
 .\venv\Scripts\activate
 
-Mac/Linux
+
+Mac/Linux:
 
 python3 -m venv venv
 source venv/bin/activate
 
-Install dependencies
-
+3. Install dependencies
 pip install -r requirements.txt
 
-Create a .env file in backend/ with the following:
-LMS credentials
-
+4. Create a .env file in backend/ with the following content
+# LMS credentials
 LMS_USERNAME=your_student_id
 LMS_PASSWORD=your_password
 
-Email notifications
-
+# Email notifications
 GMAIL_SENDER=your_email@gmail.com
-
 GMAIL_APP_PASSWORD=your_16_char_app_password
 GMAIL_RECEIVER=your_email@gmail.com
 
-Security
-
+# Security
 SECRET_KEY=random_string_for_jwt_tokens
 ENCRYPTION_KEY=random_key_for_fernet
 
-Google Calendar
-
+# Google Calendar
 GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json
 
-Google Calendar setup:
-Place service_account.json in backend root
-Share your calendar with the client_email inside the JSON file
-Initialize database (run once)
+5. Google Calendar setup
 
+Place service_account.json in the backend root folder.
+
+Share your Google Calendar with the client_email from the JSON file.
+
+6. Initialize the database (run once)
 python migrate_chat_tables.py
 
-Start backend server
-
+7. Start the backend server
 python app.py
 
-----------------------------
-Frontend Setup
-----------------------------
-Navigate to frontend folder
-
+🚀 Frontend Setup
+1. Navigate to the frontend folder
 cd ../frontend
 
-Install dependencies
-
+2. Install dependencies
 npm install
 
-Create a .env file in frontend/:
-
+3. Create a .env file in frontend/ with the following content
 VITE_API_URL=http://127.0.0.1:5000
+
+4. Start the frontend development server
+npm run dev
 
 Run frontend development server
 
