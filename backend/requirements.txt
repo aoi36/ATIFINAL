@@ -1,0 +1,35 @@
+# requirements.txt
+
+google-generativeai
+PyJWT 
+Werkzeug
+Flask
+Flask-Cors
+schedule
+python-dotenv
+opencv-python
+mss
+numpy
+moviepy
+openai-whisper
+undetected-chromedriver
+selenium
+sounddevice
+soundfile
+anthropic
+requests
+beautifulsoup4
+python-docx
+python-pptx
+pdfplumber
+python-dateutil
+Whoosh
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+googleapiclient  # Extra
+plyer
+pyttsx3
+pytz
+python-dateutil
