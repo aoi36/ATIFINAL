@@ -69,6 +69,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 3. Install dependencies
+
 pip install -r requirements.txt
 
 4. Create a .env file in backend/ with the following content
@@ -90,29 +91,36 @@ GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json
 
 5. Google Calendar setup
 
+
 Place service_account.json in the backend root folder.
+
 
 Share your Google Calendar with the client_email from the JSON file.
 
 6. Initialize the database (run once)
+
 python migrate_chat_tables.py
 
 7. Start the backend server
+
 python app.py
 
 🚀 Frontend Setup
 1. Navigate to the frontend folder
-cd ../frontend
+
+ cd ../frontend
 
 2. Install dependencies
-npm install
+
+ npm install
 
 3. Create a .env file in frontend/ with the following content
-VITE_API_URL=http://127.0.0.1:5000
 
-4. Start the frontend development server
-npm run dev
+ VITE_API_URL=http://127.0.0.1:5000
+
+
 
 Run frontend development server
+
 
 npm run dev
